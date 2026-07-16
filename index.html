@@ -113,6 +113,10 @@ main{padding:16px;padding-bottom:44px}
 #bcSearchInput:focus{outline:none;border-color:var(--accent)}
 #bcSearchInput::placeholder{color:var(--text2)}
 .bc-status-filter{margin:8px 0}
+.bc-section-heading{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+.bc-section-heading:first-child{margin-top:0}
+.bc-live-tag{margin-left:8px;font-size:10px;font-weight:700;letter-spacing:.5px;color:#fff;background:#e74c3c;padding:2px 7px;border-radius:10px;vertical-align:middle;display:inline-flex;align-items:center;gap:4px}
+.bc-live-tag .live-dot{background:#fff}
 
 /* Toast */
 .toast{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);padding:8px 20px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:13px;z-index:300;animation:fadeUp .3s ease}
@@ -312,6 +316,14 @@ function roundStatus(round, now = Date.now()) {
   if (round.finished) return 'finished';
   if (typeof round.startsAt === 'number' && round.startsAt > now) return 'upcoming';
   return 'live';
+}
+
+function tourCategory(tour, currentRound, now = Date.now()) {
+  const end = tour.dates?.[1];
+  if (typeof end === 'number') return end < now ? 'past' : 'current';
+  // Rare item with no `dates` field: infer from its round instead.
+  if (currentRound && roundStatus(currentRound, now) === 'finished') return 'past';
+  return 'current';
 }
 
 /* ======= URL Parsing ======= */
@@ -1003,15 +1015,65 @@ async function runBrowseSearch(query) {
   }
 }
 
-function formatTourSummary(tour, currentRound) {
+function formatTourInfo(tour) {
   const parts = [];
   if (tour.info?.format) parts.push(tour.info.format);
   if (tour.info?.location) parts.push(tour.info.location);
-  if (currentRound) {
-    const st = roundStatus(currentRound);
-    parts.push(st === 'live' ? 'Live now' : st === 'upcoming' ? 'Upcoming' : 'Finished');
-  }
   return parts.join(' \u00b7 ');
+}
+
+function sectionHeading(text) {
+  const h = document.createElement('div');
+  h.className = 'bc-section-heading';
+  h.textContent = text;
+  return h;
+}
+
+function buildBcItem(item) {
+  const tour = item.tour;
+  const isLive = item.round && roundStatus(item.round) === 'live';
+
+  const el = document.createElement('div');
+  el.className = 'bc-item';
+
+  const nameRow = document.createElement('div');
+  nameRow.className = 'bc-name-row';
+
+  const left = document.createElement('div');
+  const name = document.createElement('div');
+  name.className = 'bc-name';
+  name.textContent = tour.name;
+  if (isLive) {
+    const tag = document.createElement('span');
+    tag.className = 'bc-live-tag';
+    tag.innerHTML = '<span class="live-dot"></span>LIVE';
+    name.appendChild(tag);
+  }
+  left.appendChild(name);
+
+  const info = document.createElement('div');
+  info.className = 'bc-info';
+  info.textContent = formatTourInfo(tour);
+  left.appendChild(info);
+
+  const expandBtn = document.createElement('button');
+  expandBtn.className = 'btn-sm btn-secondary bc-expand-btn';
+  expandBtn.textContent = 'Rounds \u25be';
+
+  nameRow.appendChild(left);
+  nameRow.appendChild(expandBtn);
+
+  const panel = document.createElement('div');
+  panel.className = 'bc-rounds-panel';
+  panel.style.display = 'none';
+
+  const toggle = () => expandTournament(tour.id, tour.name, panel, expandBtn);
+  nameRow.onclick = toggle;
+  expandBtn.onclick = (e) => { e.stopPropagation(); toggle(); };
+
+  el.appendChild(nameRow);
+  el.appendChild(panel);
+  return el;
 }
 
 function renderBrowseResults() {
@@ -1030,46 +1092,21 @@ function renderBrowseResults() {
   }
 
   const seen = new Set();
+  const current = [], past = [];
   for (const item of items) {
     const tour = item.tour;
     if (!tour?.id || seen.has(tour.id)) continue;
     seen.add(tour.id);
+    (tourCategory(tour, item.round) === 'past' ? past : current).push(item);
+  }
 
-    const el = document.createElement('div');
-    el.className = 'bc-item';
-
-    const nameRow = document.createElement('div');
-    nameRow.className = 'bc-name-row';
-
-    const left = document.createElement('div');
-    const name = document.createElement('div');
-    name.className = 'bc-name';
-    name.textContent = tour.name;
-    left.appendChild(name);
-
-    const info = document.createElement('div');
-    info.className = 'bc-info';
-    info.textContent = formatTourSummary(tour, item.round);
-    left.appendChild(info);
-
-    const expandBtn = document.createElement('button');
-    expandBtn.className = 'btn-sm btn-secondary bc-expand-btn';
-    expandBtn.textContent = 'Rounds \u25be';
-
-    nameRow.appendChild(left);
-    nameRow.appendChild(expandBtn);
-
-    const panel = document.createElement('div');
-    panel.className = 'bc-rounds-panel';
-    panel.style.display = 'none';
-
-    const toggle = () => expandTournament(tour.id, tour.name, panel, expandBtn);
-    nameRow.onclick = toggle;
-    expandBtn.onclick = (e) => { e.stopPropagation(); toggle(); };
-
-    el.appendChild(nameRow);
-    el.appendChild(panel);
-    results.appendChild(el);
+  if (current.length) {
+    results.appendChild(sectionHeading('Current'));
+    current.forEach(item => results.appendChild(buildBcItem(item)));
+  }
+  if (past.length) {
+    results.appendChild(sectionHeading('Past'));
+    past.forEach(item => results.appendChild(buildBcItem(item)));
   }
 }
 
