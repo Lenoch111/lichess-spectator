@@ -80,9 +80,11 @@ main{padding:16px;padding-bottom:44px}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
 /* Empty state */
-.empty-state{text-align:center;padding:80px 20px;color:var(--text2)}
-.empty-state h2{font-size:1.2rem;margin-bottom:8px;color:var(--text)}
+.empty-state{text-align:center;padding:56px 20px;color:var(--text2)}
+.empty-icon{font-size:2.4rem;line-height:1;color:var(--text2);opacity:.5;margin-bottom:12px}
+.empty-state h2{font-size:1.2rem;margin-bottom:6px;color:var(--text)}
 .empty-state p{margin-bottom:6px;font-size:13px}
+.empty-example{margin-top:10px}
 .empty-state code{background:var(--bg2);padding:2px 6px;border-radius:3px;font-size:12px}
 
 /* Status bar */
@@ -195,11 +197,11 @@ main{padding:16px;padding-bottom:44px}
   </div>
   <div id="sourceContainer"></div>
   <div class="empty-state" id="emptyState">
+    <div class="empty-icon">&#9822;</div>
     <h2>No games being followed</h2>
     <p>Paste a Lichess broadcast round URL to get started</p>
-    <p style="margin-top:16px">Example:</p>
-    <p><code>https://lichess.org/broadcast/some-event/round-1/AbCdEfGh</code></p>
-    <p style="margin-top:12px">Or click <strong>Browse</strong> to find live broadcasts</p>
+    <p class="empty-example">Example: <code>https://lichess.org/broadcast/some-event/round-1/AbCdEfGh</code></p>
+    <p>Or click <strong>Browse</strong> to find live broadcasts</p>
   </div>
 </main>
 
