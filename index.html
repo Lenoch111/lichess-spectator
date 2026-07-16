@@ -106,6 +106,14 @@ main{padding:16px;padding-bottom:44px}
 .round-btn:hover{border-color:var(--accent)}
 .round-btn.live{border-color:var(--accent);background:rgba(98,153,36,.2)}
 
+.bc-name-row{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer}
+.bc-rounds-panel{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+.bc-search-row{margin-bottom:12px}
+#bcSearchInput{width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px}
+#bcSearchInput:focus{outline:none;border-color:var(--accent)}
+#bcSearchInput::placeholder{color:var(--text2)}
+.bc-status-filter{margin:8px 0}
+
 /* Toast */
 .toast{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);padding:8px 20px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:13px;z-index:300;animation:fadeUp .3s ease}
 .toast.err{border-color:#e74c3c;color:#e74c3c}
@@ -263,6 +271,18 @@ let sources = [];   // [{type,id,name,roundUrl,games:[...],selectedIds:[...]}]
 let polling = null;
 let piecesOk = true; // assume SVG pieces load, flip on first error
 
+const STATUS_DEFS = [
+  {key:'live', label:'Live'},
+  {key:'upcoming', label:'Upcoming'},
+  {key:'finished', label:'Finished'}
+];
+let browseState = {
+  query: '', results: [], expandedTourId: null,
+  expandedRounds: null, expandedDefaultRoundId: null,
+  statusFilter: new Set(['live','upcoming','finished']),
+  debounceTimer: null, requestSeq: 0
+};
+
 /* ======= API ======= */
 async function apiFetchRound(rid) {
   const r = await fetch(`${API}/api/broadcast/-/-/${rid}`);
@@ -270,11 +290,28 @@ async function apiFetchRound(rid) {
   return r.json();
 }
 
-async function apiFetchBroadcasts(nb=30) {
-  const r = await fetch(`${API}/api/broadcast?nb=${nb}`);
+async function apiFetchBroadcastsTop(page=1) {
+  const r = await fetch(`${API}/api/broadcast/top?page=${page}`);
   if (!r.ok) throw new Error(`Failed (${r.status})`);
-  const t = await r.text();
-  return t.trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+  return r.json();
+}
+
+async function apiSearchBroadcasts(query, page=1) {
+  const r = await fetch(`${API}/api/broadcast/search?q=${encodeURIComponent(query)}&page=${page}`);
+  if (!r.ok) throw new Error(`Failed (${r.status})`);
+  return r.json();
+}
+
+async function apiFetchTournament(tourId) {
+  const r = await fetch(`${API}/api/broadcast/${tourId}`);
+  if (!r.ok) throw new Error(`Tournament not found (${r.status})`);
+  return r.json();
+}
+
+function roundStatus(round, now = Date.now()) {
+  if (round.finished) return 'finished';
+  if (typeof round.startsAt === 'number' && round.startsAt > now) return 'upcoming';
+  return 'live';
 }
 
 /* ======= URL Parsing ======= */
@@ -895,69 +932,257 @@ function setSize(sz) {
 }
 
 /* ======= Browse modal ======= */
-async function openBrowse() {
+function openBrowse() {
   const bg = document.getElementById('modalBg');
   const body = document.getElementById('modalBody');
+  const title = document.getElementById('modalTitle');
+  title.textContent = 'Browse Broadcasts';
   bg.style.display = 'flex';
-  body.innerHTML = '<div style="text-align:center;padding:24px"><span class="spinner"></span> Loading broadcasts...</div>';
+
+  // Reset state fields in place (not a full reassignment) so requestSeq keeps
+  // climbing across opens -- that's what lets a stale in-flight fetch from a
+  // previous session be told apart from a fresh one.
+  browseState.query = '';
+  browseState.results = [];
+  browseState.expandedTourId = null;
+  browseState.expandedRounds = null;
+  browseState.expandedDefaultRoundId = null;
+  browseState.statusFilter = new Set(['live','upcoming','finished']);
+  if (browseState.debounceTimer) clearTimeout(browseState.debounceTimer);
+  browseState.debounceTimer = null;
+  browseState.requestSeq++;
+
+  body.innerHTML = `
+    <div class="bc-search-row">
+      <input type="text" id="bcSearchInput" placeholder="Search broadcasts by name (leave empty for currently live)">
+    </div>
+    <div id="bcResults"></div>`;
+
+  const input = document.getElementById('bcSearchInput');
+  input.oninput = () => {
+    clearTimeout(browseState.debounceTimer);
+    browseState.debounceTimer = setTimeout(() => runBrowseSearch(input.value), 350);
+  };
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') { clearTimeout(browseState.debounceTimer); runBrowseSearch(input.value); }
+  };
+
+  runBrowseSearch('');
+}
+
+async function runBrowseSearch(query) {
+  const q = (query || '').trim();
+  browseState.query = q;
+  browseState.expandedTourId = null;
+  browseState.expandedRounds = null;
+  const seq = ++browseState.requestSeq;
+
+  const results = document.getElementById('bcResults');
+  if (!results) return; // modal already closed
+  results.innerHTML = '<div style="text-align:center;padding:24px"><span class="spinner"></span> Loading...</div>';
 
   try {
-    const bcs = await apiFetchBroadcasts(40);
-    if (!bcs.length) { body.innerHTML = '<p>No broadcasts found.</p>'; return; }
-    body.innerHTML = '';
-    for (const bc of bcs) {
-      const item = document.createElement('div');
-      item.className = 'bc-item';
-
-      const name = document.createElement('div');
-      name.className = 'bc-name';
-      name.textContent = bc.tour.name;
-
-      const info = document.createElement('div');
-      info.className = 'bc-info';
-      const rounds = bc.rounds || [];
-      const liveRounds = rounds.filter(r => r.ongoing);
-      info.textContent = `${rounds.length} rounds` + (liveRounds.length ? ` \u00b7 ${liveRounds.length} live` : '');
-
-      const rl = document.createElement('div');
-      rl.className = 'round-list';
-      // Show live rounds first, then last few
-      const shown = new Set();
-      const toShow = [];
-      for (const r of liveRounds) { toShow.push(r); shown.add(r.id); }
-      for (const r of rounds.slice(-6)) { if (!shown.has(r.id)) { toShow.push(r); shown.add(r.id); } }
-
-      for (const round of toShow) {
-        const btn = document.createElement('button');
-        btn.className = 'round-btn' + (round.ongoing ? ' live' : '');
-        btn.textContent = round.name + (round.ongoing ? ' \ud83d\udd34' : '');
-        btn.onclick = async () => {
-          btn.disabled = true;
-          const orig = btn.textContent;
-          btn.textContent = '...';
-          try {
-            const ok = await addRound(round.id, bc.tour.name, round.name);
-            btn.textContent = ok ? '\u2713 Added' : orig;
-          } catch(e) {
-            toast('Failed: ' + e.message, true);
-            btn.textContent = orig;
-            btn.disabled = false;
-          }
-        };
-        rl.appendChild(btn);
-      }
-
-      item.appendChild(name);
-      item.appendChild(info);
-      item.appendChild(rl);
-      body.appendChild(item);
+    let items;
+    if (!q) {
+      const data = await apiFetchBroadcastsTop(1);
+      items = data.active || [];
+    } else {
+      const data = await apiSearchBroadcasts(q, 1);
+      items = data.currentPageResults || [];
     }
+    if (seq !== browseState.requestSeq) return; // a newer search (or close) happened meanwhile
+    browseState.results = items;
+    renderBrowseResults();
   } catch(e) {
-    body.innerHTML = `<p style="color:#e74c3c">Error: ${e.message}</p>`;
+    if (seq !== browseState.requestSeq) return;
+    results.innerHTML = '';
+    const p = document.createElement('p');
+    p.style.color = '#e74c3c';
+    p.textContent = 'Error: ' + e.message;
+    results.appendChild(p);
   }
 }
 
-function closeModal() { document.getElementById('modalBg').style.display = 'none'; }
+function formatTourSummary(tour, currentRound) {
+  const parts = [];
+  if (tour.info?.format) parts.push(tour.info.format);
+  if (tour.info?.location) parts.push(tour.info.location);
+  if (currentRound) {
+    const st = roundStatus(currentRound);
+    parts.push(st === 'live' ? 'Live now' : st === 'upcoming' ? 'Upcoming' : 'Finished');
+  }
+  return parts.join(' \u00b7 ');
+}
+
+function renderBrowseResults() {
+  const results = document.getElementById('bcResults');
+  if (!results) return;
+  results.innerHTML = '';
+  const items = browseState.results;
+
+  if (!items.length) {
+    const p = document.createElement('p');
+    p.textContent = browseState.query
+      ? `No broadcasts found for "${browseState.query}".`
+      : 'No live broadcasts right now.';
+    results.appendChild(p);
+    return;
+  }
+
+  const seen = new Set();
+  for (const item of items) {
+    const tour = item.tour;
+    if (!tour?.id || seen.has(tour.id)) continue;
+    seen.add(tour.id);
+
+    const el = document.createElement('div');
+    el.className = 'bc-item';
+
+    const nameRow = document.createElement('div');
+    nameRow.className = 'bc-name-row';
+
+    const left = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'bc-name';
+    name.textContent = tour.name;
+    left.appendChild(name);
+
+    const info = document.createElement('div');
+    info.className = 'bc-info';
+    info.textContent = formatTourSummary(tour, item.round);
+    left.appendChild(info);
+
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'btn-sm btn-secondary bc-expand-btn';
+    expandBtn.textContent = 'Rounds \u25be';
+
+    nameRow.appendChild(left);
+    nameRow.appendChild(expandBtn);
+
+    const panel = document.createElement('div');
+    panel.className = 'bc-rounds-panel';
+    panel.style.display = 'none';
+
+    const toggle = () => expandTournament(tour.id, tour.name, panel, expandBtn);
+    nameRow.onclick = toggle;
+    expandBtn.onclick = (e) => { e.stopPropagation(); toggle(); };
+
+    el.appendChild(nameRow);
+    el.appendChild(panel);
+    results.appendChild(el);
+  }
+}
+
+async function expandTournament(tourId, tourName, panelEl, btnEl) {
+  const isOpen = browseState.expandedTourId === tourId;
+
+  // Accordion: collapse any other open panel/button first
+  document.querySelectorAll('.bc-rounds-panel').forEach(p => { if (p !== panelEl) p.style.display = 'none'; });
+  document.querySelectorAll('.bc-expand-btn').forEach(b => { if (b !== btnEl) b.textContent = 'Rounds \u25be'; });
+
+  if (isOpen) {
+    panelEl.style.display = 'none';
+    btnEl.textContent = 'Rounds \u25be';
+    browseState.expandedTourId = null;
+    return;
+  }
+
+  browseState.expandedTourId = tourId;
+  btnEl.textContent = 'Rounds \u25b4';
+  panelEl.style.display = '';
+  panelEl.innerHTML = '<div style="padding:8px"><span class="spinner"></span> Loading rounds...</div>';
+
+  try {
+    const data = await apiFetchTournament(tourId);
+    if (browseState.expandedTourId !== tourId || !panelEl.isConnected) return; // stale
+    browseState.expandedRounds = data.rounds || [];
+    browseState.expandedDefaultRoundId = data.defaultRoundId || null;
+    renderRoundsList(panelEl, tourName, data);
+  } catch(e) {
+    if (browseState.expandedTourId !== tourId || !panelEl.isConnected) return;
+    panelEl.innerHTML = '';
+    const p = document.createElement('p');
+    p.style.color = '#e74c3c';
+    p.textContent = 'Error loading rounds: ' + e.message;
+    panelEl.appendChild(p);
+  }
+}
+
+function renderRoundsList(panelEl, tourName, data) {
+  const rounds = data.rounds || [];
+  panelEl.innerHTML = '';
+
+  if (!rounds.length) {
+    const p = document.createElement('p');
+    p.style.cssText = 'font-size:12px;color:var(--text2)';
+    p.textContent = 'No rounds available for this tournament.';
+    panelEl.appendChild(p);
+    return;
+  }
+
+  const filterBar = document.createElement('div');
+  filterBar.className = 'filter-bar bc-status-filter';
+  filterBar.innerHTML = STATUS_DEFS.map(s =>
+    `<label><input type="checkbox" class="bc-status-cb" value="${s.key}" ${browseState.statusFilter.has(s.key)?'checked':''}> ${s.label}</label>`
+  ).join('');
+  panelEl.appendChild(filterBar);
+
+  const rl = document.createElement('div');
+  rl.className = 'round-list';
+  panelEl.appendChild(rl);
+
+  function draw() {
+    rl.innerHTML = '';
+    const visible = rounds.filter(r => browseState.statusFilter.has(roundStatus(r)));
+    if (!visible.length) {
+      const p = document.createElement('p');
+      p.style.cssText = 'font-size:12px;color:var(--text2)';
+      p.textContent = 'No rounds match the selected filters.';
+      rl.appendChild(p);
+      return;
+    }
+    for (const round of visible) {
+      const st = roundStatus(round);
+      const isDefault = round.id === data.defaultRoundId;
+      const btn = document.createElement('button');
+      btn.className = 'round-btn' + (st === 'live' ? ' live' : '');
+      btn.textContent = round.name
+        + (st === 'live' ? ' \ud83d\udd34' : '')
+        + (st === 'upcoming' ? ' (upcoming)' : '')
+        + (isDefault ? ' \u2605' : '');
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = '...';
+        try {
+          const ok = await addRound(round.id, tourName, round.name);
+          btn.textContent = ok ? '\u2713 Added' : orig;
+          if (!ok) btn.disabled = false;
+        } catch(e) {
+          toast('Failed: ' + e.message, true);
+          btn.textContent = orig;
+          btn.disabled = false;
+        }
+      };
+      rl.appendChild(btn);
+    }
+  }
+  draw();
+
+  filterBar.querySelectorAll('.bc-status-cb').forEach(cb => {
+    cb.onchange = () => {
+      if (cb.checked) browseState.statusFilter.add(cb.value);
+      else browseState.statusFilter.delete(cb.value);
+      draw();
+    };
+  });
+}
+
+function closeModal() {
+  if (browseState.debounceTimer) { clearTimeout(browseState.debounceTimer); browseState.debounceTimer = null; }
+  browseState.requestSeq++; // any pending fetch becomes stale and no-ops when it resolves
+  document.getElementById('modalBg').style.display = 'none';
+}
 
 /* ======= Persistence ======= */
 function save() {
