@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lichess Spectator</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#161512;--bg2:#302e2b;--bg3:#262421;
+  --text:#bababa;--text2:#8a8a8a;
+  --accent:#629924;--accent2:#7ab836;
+  --lsq:#f0d9b5;--dsq:#b58863;
+  --hlsq:#cdd16a;--hdsq:#aaa23a;
+  --title:#bf811d;--border:#3a3a3a;
+  --board-min:220px;
+}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
+
+/* Header */
+header{background:var(--bg2);padding:10px 16px;position:sticky;top:0;z-index:100;border-bottom:1px solid var(--border)}
+.header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.header-top h1{font-size:1.1rem;font-weight:600}
+.header-top .update-info{font-size:11px;color:var(--text2)}
+.controls{display:flex;gap:8px}
+#urlInput{flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px;min-width:0}
+#urlInput:focus{outline:none;border-color:var(--accent)}
+#urlInput::placeholder{color:var(--text2)}
+button{padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:500;white-space:nowrap}
+button:hover{background:var(--accent2)}
+button:disabled{opacity:.5;cursor:default}
+.btn-secondary{background:var(--bg);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--accent);background:var(--bg)}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-danger{background:transparent;color:var(--text2);padding:4px 8px;font-size:12px}
+.btn-danger:hover{color:#e74c3c}
+
+/* Main */
+main{padding:16px;padding-bottom:44px}
+
+/* Source groups */
+.source-group{margin-bottom:20px}
+.source-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:6px 12px;background:var(--bg2);border-radius:6px;gap:8px}
+.source-name{font-size:.9rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.source-meta{font-size:11px;color:var(--text2);white-space:nowrap}
+
+/* Game grid */
+.game-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--board-min),1fr));gap:10px}
+
+/* Game card */
+.game-card{background:var(--bg3);border-radius:5px;overflow:hidden;border:1px solid var(--border);transition:border-color .2s;cursor:pointer;position:relative}
+.game-card:hover{border-color:var(--accent)}
+.game-card.finished{opacity:.65}
+.game-card.finished:hover{opacity:.85}
+
+/* Player row */
+.player-row{display:flex;align-items:center;padding:3px 6px;gap:3px;font-size:11px;min-height:24px}
+.player-row.active{background:rgba(98,153,36,.15)}
+.player-title{color:var(--title);font-weight:700;font-size:10px;flex-shrink:0}
+.player-fed{font-size:10px;color:var(--text2);flex-shrink:0}
+.player-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;font-size:11px}
+.player-rating{color:var(--text2);font-size:10px;flex-shrink:0}
+.player-clock{font-family:'Courier New',monospace;font-size:11px;padding:1px 4px;border-radius:2px;background:var(--bg);flex-shrink:0;min-width:40px;text-align:center}
+.player-clock.active{background:#fff;color:#000;font-weight:700}
+.player-clock.low{background:#e74c3c;color:#fff}
+
+/* Board */
+.board-wrap{position:relative;width:100%;aspect-ratio:1}
+.board{display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);width:100%;height:100%}
+.sq{position:relative;display:flex;align-items:center;justify-content:center}
+.sq.l{background:var(--lsq)}.sq.d{background:var(--dsq)}
+.sq.hl{background:var(--hlsq)}.sq.hd{background:var(--hdsq)}
+.sq img{width:100%;height:100%;object-fit:contain;pointer-events:none}
+.sq .pc-uni{font-size:min(3vw,24px);line-height:1;user-select:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.3))}
+.result-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.65);font-size:1.3rem;font-weight:700;color:#fff;letter-spacing:1px}
+
+/* Game footer */
+.game-footer{display:flex;align-items:center;justify-content:space-between;padding:2px 6px;font-size:10px;color:var(--text2)}
+.live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#e74c3c;margin-right:3px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* Empty state */
+.empty-state{text-align:center;padding:80px 20px;color:var(--text2)}
+.empty-state h2{font-size:1.2rem;margin-bottom:8px;color:var(--text)}
+.empty-state p{margin-bottom:6px;font-size:13px}
+.empty-state code{background:var(--bg2);padding:2px 6px;border-radius:3px;font-size:12px}
+
+/* Status bar */
+.status-bar{position:fixed;bottom:0;left:0;right:0;padding:4px 16px;background:var(--bg2);border-top:1px solid var(--border);font-size:11px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;z-index:100}
+.size-btns{display:flex;gap:3px}
+.size-btns button{padding:2px 8px;font-size:11px;background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:3px}
+.size-btns button.on{border-color:var(--accent);color:var(--accent)}
+
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow-y:auto}
+.modal{background:var(--bg2);border-radius:8px;width:100%;max-width:640px;max-height:80vh;overflow-y:auto}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)}
+.modal-head h2{font-size:1rem}
+.modal-body{padding:12px 16px}
+.bc-item{padding:10px 0;border-bottom:1px solid var(--border)}
+.bc-item:last-child{border-bottom:none}
+.bc-name{font-weight:600;font-size:14px;margin-bottom:2px}
+.bc-info{font-size:12px;color:var(--text2);margin-bottom:6px}
+.round-list{display:flex;flex-wrap:wrap;gap:4px}
+.round-btn{padding:3px 10px;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer}
+.round-btn:hover{border-color:var(--accent)}
+.round-btn.live{border-color:var(--accent);background:rgba(98,153,36,.2)}
+
+/* Toast */
+.toast{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);padding:8px 20px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:13px;z-index:300;animation:fadeUp .3s ease}
+.toast.err{border-color:#e74c3c;color:#e74c3c}
+@keyframes fadeUp{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+/* Spinner */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* Filter bar */
+.filter-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.filter-bar label{font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer}
+.filter-bar input[type=checkbox]{accent-color:var(--accent)}
+
+/* Game picker */
+.picker-game{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+.picker-game:last-child{border-bottom:none}
+.picker-game input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;flex-shrink:0}
+.picker-game .pg-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.picker-game .pg-title{color:var(--title);font-weight:700;font-size:11px}
+.picker-game .pg-rating{color:var(--text2);font-size:11px}
+.picker-game .pg-status{font-size:11px;color:var(--text2)}
+.picker-game .pg-live{color:#e74c3c;font-weight:600}
+.picker-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.picker-actions .pick-count{font-size:12px;color:var(--text2);margin-left:auto}
+.pick-quick{display:flex;gap:4px;margin-bottom:10px}
+.pick-quick button{padding:3px 8px;font-size:11px}
+
+/* Remove game button */
+.game-remove{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.6);color:#999;border:none;font-size:12px;line-height:18px;text-align:center;cursor:pointer;padding:0;z-index:2;display:none}
+.game-card:hover .game-remove{display:block}
+.game-remove:hover{background:rgba(231,76,60,.8);color:#fff}
+
+/* Source header buttons */
+.source-btns{display:flex;gap:4px;align-items:center;flex-shrink:0}
+
+/* Reorder buttons */
+.reorder-btns{display:flex;gap:2px;align-items:center}
+.reorder-btns button{width:20px;height:20px;padding:0;font-size:11px;line-height:20px;text-align:center;background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:3px;cursor:pointer}
+.reorder-btns button:hover{border-color:var(--accent);color:var(--text)}
+.reorder-btns button:disabled{opacity:.2;cursor:default;border-color:var(--border);color:var(--text2)}
+
+/* Flags */
+.player-flag{flex-shrink:0;display:inline-flex;align-items:center}
+.player-flag img{height:11px;border-radius:1px}
+.pg-flag{margin-right:3px}
+.pg-flag img{height:12px;border-radius:1px;vertical-align:middle}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <h1>Lichess Spectator</h1>
+    <span class="update-info" id="updateInfo"></span>
+  </div>
+  <div class="controls">
+    <input type="text" id="urlInput"
+      placeholder="Paste broadcast URL (round or specific game)..."
+      onkeydown="if(event.key==='Enter')addFromInput()">
+    <button onclick="addFromInput()" id="addBtn">Add</button>
+    <button class="btn-secondary" onclick="openBrowse()">Browse</button>
+  </div>
+</header>
+
+<main id="main">
+  <div class="filter-bar" id="filterBar" style="display:none">
+    <label><input type="checkbox" id="hideFinished" onchange="render()"> Hide finished</label>
+    <label><input type="checkbox" id="ongoingFirst" checked onchange="render()"> Ongoing first</label>
+  </div>
+  <div id="sourceContainer"></div>
+  <div class="empty-state" id="emptyState">
+    <h2>No games being followed</h2>
+    <p>Paste a Lichess broadcast round URL to get started</p>
+    <p style="margin-top:16px">Example:</p>
+    <p><code>https://lichess.org/broadcast/some-event/round-1/AbCdEfGh</code></p>
+    <p style="margin-top:12px">Or click <strong>Browse</strong> to find live broadcasts</p>
+  </div>
+</main>
+
+<div class="status-bar">
+  <span id="statusText">Ready</span>
+  <div class="size-btns">
+    <button onclick="setSize('s')" id="szS">S</button>
+    <button onclick="setSize('m')" id="szM" class="on">M</button>
+    <button onclick="setSize('l')" id="szL">L</button>
+  </div>
+</div>
+
+<div id="modalBg" class="modal-bg" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="modalTitle">Live Broadcasts</h2>
+      <button class="btn-danger" onclick="closeModal()">Close</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+/* ======= Config ======= */
+const PIECE_SRC = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett';
+const API = 'https://lichess.org';
+const POLL_MS = 5000;
+const SIZES = {s:'160px',m:'220px',l:'300px'};
+const PIECE_MAP = {
+  K:'wK',Q:'wQ',R:'wR',B:'wB',N:'wN',P:'wP',
+  k:'bK',q:'bQ',r:'bR',b:'bB',n:'bN',p:'bP'
+};
+const UNI = {
+  wK:'\u2654',wQ:'\u2655',wR:'\u2656',wB:'\u2657',wN:'\u2658',wP:'\u2659',
+  bK:'\u265A',bQ:'\u265B',bR:'\u265C',bB:'\u265D',bN:'\u265E',bP:'\u265F'
+};
+
+/* ======= FIDE federation to ISO alpha-2 (for flag emoji) ======= */
+const F2={
+  AFG:'AF',ALB:'AL',ALG:'DZ',AND:'AD',ANG:'AO',ANT:'AG',ARG:'AR',ARM:'AM',ARU:'AW',AUS:'AU',
+  AUT:'AT',AZE:'AZ',BAH:'BS',BRN:'BH',BAN:'BD',BAR:'BB',BLR:'BY',BEL:'BE',BIZ:'BZ',BEN:'BJ',
+  BER:'BM',BHU:'BT',BOL:'BO',BIH:'BA',BOT:'BW',BRA:'BR',BRU:'BN',BUL:'BG',BUR:'BF',BDI:'BI',
+  CAM:'KH',CMR:'CM',CAN:'CA',CPV:'CV',CAY:'KY',CAF:'CF',CHA:'TD',CHI:'CL',CHN:'CN',COL:'CO',
+  COM:'KM',CGO:'CG',COD:'CD',CRC:'CR',CIV:'CI',CRO:'HR',CUB:'CU',CYP:'CY',CZE:'CZ',DEN:'DK',
+  DJI:'DJ',DMA:'DM',DOM:'DO',ECU:'EC',EGY:'EG',ESA:'SV',ENG:'GB',EQG:'GQ',ERI:'ER',EST:'EE',
+  ETH:'ET',FAI:'FO',FIJ:'FJ',FIN:'FI',FRA:'FR',GAB:'GA',GAM:'GM',GEO:'GE',GER:'DE',GHA:'GH',
+  GRE:'GR',GUA:'GT',GUI:'GN',GBS:'GW',GUY:'GY',HAI:'HT',HON:'HN',HKG:'HK',HUN:'HU',ISL:'IS',
+  IND:'IN',INA:'ID',IRI:'IR',IRQ:'IQ',IRL:'IE',ISR:'IL',ITA:'IT',JAM:'JM',JPN:'JP',JOR:'JO',
+  KAZ:'KZ',KEN:'KE',KOR:'KR',PRK:'KP',KOS:'XK',KUW:'KW',KGZ:'KG',LAO:'LA',LAT:'LV',LBN:'LB',
+  LES:'LS',LBR:'LR',LBA:'LY',LIE:'LI',LTU:'LT',LUX:'LU',MAC:'MO',MAD:'MG',MAW:'MW',MAS:'MY',
+  MDV:'MV',MLI:'ML',MLT:'MT',MRI:'MU',MEX:'MX',MDA:'MD',MNC:'MC',MGL:'MN',MNE:'ME',MAR:'MA',
+  MOZ:'MZ',MYA:'MM',NAM:'NA',NEP:'NP',NED:'NL',NZL:'NZ',NCA:'NI',NIG:'NE',NGR:'NG',MKD:'MK',
+  NOR:'NO',OMA:'OM',PAK:'PK',PLE:'PS',PAN:'PA',PAR:'PY',PER:'PE',PHI:'PH',POL:'PL',POR:'PT',
+  PUR:'PR',QAT:'QA',ROU:'RO',RUS:'RU',RWA:'RW',KSA:'SA',SCO:'GB',SEN:'SN',SRB:'RS',SEY:'SC',
+  SGP:'SG',SVK:'SK',SLO:'SI',SOM:'SO',RSA:'ZA',ESP:'ES',SRI:'LK',SUD:'SD',SUR:'SR',SWE:'SE',
+  SUI:'CH',SYR:'SY',TPE:'TW',TJK:'TJ',TAN:'TZ',THA:'TH',TLS:'TL',TOG:'TG',TTO:'TT',TUN:'TN',
+  TUR:'TR',TKM:'TM',UAE:'AE',UGA:'UG',UKR:'UA',URU:'UY',USA:'US',UZB:'UZ',VEN:'VE',VIE:'VN',
+  WLS:'GB',YEM:'YE',ZAM:'ZM',ZIM:'ZW'
+};
+function flagCode(fed) {
+  if (!fed) return '';
+  return (F2[fed] || '').toLowerCase();
+}
+function flagImg(fed, size) {
+  const code = flagCode(fed);
+  if (!code) return '';
+  const sz = size || 20;
+  return `<img src="https://flagcdn.com/w${sz}/${code}.png" alt="${fed}" title="${fed}" style="height:${Math.round(sz*0.75)}px;vertical-align:middle" loading="lazy">`;
+}
+
+/* ======= State ======= */
+let sources = [];   // [{type,id,name,roundUrl,games:[...],selectedIds:[...]}]
+let polling = null;
+let piecesOk = true; // assume SVG pieces load, flip on first error
+
+/* ======= API ======= */
+async function apiFetchRound(rid) {
+  const r = await fetch(`${API}/api/broadcast/-/-/${rid}`);
+  if (!r.ok) throw new Error(`Round not found (${r.status})`);
+  return r.json();
+}
+
+async function apiFetchBroadcasts(nb=30) {
+  const r = await fetch(`${API}/api/broadcast?nb=${nb}`);
+  if (!r.ok) throw new Error(`Failed (${r.status})`);
+  const t = await r.text();
+  return t.trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+}
+
+/* ======= URL Parsing ======= */
+function parseInput(raw) {
+  let s = raw.trim().replace(/\/+$/,'');
+  if (!s) return null;
+
+  // Try as URL
+  try {
+    if (!/^https?:\/\//.test(s)) s = 'https://' + s;
+    const u = new URL(s);
+    if (!u.hostname.includes('lichess.org')) return null;
+    const p = u.pathname.split('/').filter(Boolean);
+
+    if (p[0] === 'broadcast') {
+      // Collect 8-char alphanum IDs from the end
+      const ids = [];
+      for (let i = p.length-1; i >= 1; i--) {
+        if (/^[A-Za-z0-9]{8}$/.test(p[i])) ids.unshift(p[i]);
+        else break;
+      }
+      if (ids.length >= 2) return {type:'broadcast-game', roundId:ids[0], gameId:ids[1]};
+      if (ids.length === 1) return {type:'round', id:ids[0]};
+    }
+
+    // Regular game /{gameId}
+    if (p.length >= 1 && /^[A-Za-z0-9]{8,12}$/.test(p[0])) {
+      return {type:'round', id:p[0].slice(0,8)}; // try as round first
+    }
+  } catch(e) {/* not a URL */}
+
+  // Raw 8-char ID
+  if (/^[A-Za-z0-9]{8}$/.test(s)) return {type:'round', id:s};
+
+  return null;
+}
+
+/* ======= Add source ======= */
+async function addFromInput() {
+  const inp = document.getElementById('urlInput');
+  const parsed = parseInput(inp.value);
+  if (!parsed) { toast('Paste a Lichess broadcast round URL or 8-char round ID', true); return; }
+
+  const roundId = parsed.type === 'broadcast-game' ? parsed.roundId : parsed.id;
+
+  const btn = document.getElementById('addBtn');
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const data = await apiFetchRound(roundId);
+
+    if (parsed.type === 'broadcast-game') {
+      // Direct add of a single game
+      addSourceWithSelection(roundId, data, [parsed.gameId]);
+      inp.value = '';
+    } else {
+      // Show game picker
+      inp.value = '';
+      showGamePicker(roundId, data);
+    }
+  } catch(e) {
+    toast('Failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Add';
+  }
+}
+
+function addSourceWithSelection(roundId, data, selectedIds) {
+  const existing = sources.find(s => s.id === roundId);
+  if (existing) {
+    // Merge selections into existing source
+    const merged = new Set(existing.selectedIds || []);
+    selectedIds.forEach(id => merged.add(id));
+    existing.selectedIds = [...merged];
+    render(); save();
+    toast(`Now following ${existing.selectedIds.length} games from this round`);
+  } else {
+    sources.push({
+      type: 'broadcast-round',
+      id: roundId,
+      name: `${data.tour.name} \u2014 ${data.round.name}`,
+      roundUrl: data.round.url || '',
+      games: data.games || [],
+      selectedIds: selectedIds  // null = all, array = specific
+    });
+    render(); save();
+    toast(`Added ${selectedIds ? selectedIds.length : 'all'} games!`);
+  }
+  status(`Following ${countGames()} games`);
+}
+
+async function addRound(rid, tourName, roundName) {
+  if (sources.find(s => s.id === rid)) { toast('Already following', true); return false; }
+  const data = await apiFetchRound(rid);
+  showGamePicker(rid, data, tourName, roundName);
+  return true;
+}
+
+function removeSource(id) {
+  sources = sources.filter(s => s.id !== id);
+  render(); save();
+  status(sources.length ? `Following ${countGames()} games` : 'Ready');
+}
+
+function moveSource(id, dir) {
+  const idx = sources.findIndex(s => s.id === id);
+  if (idx < 0) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= sources.length) return;
+  [sources[idx], sources[newIdx]] = [sources[newIdx], sources[idx]];
+  render(); save();
+}
+
+function removeGame(sourceId, gameId) {
+  const src = sources.find(s => s.id === sourceId);
+  if (!src) return;
+  if (!src.selectedIds) {
+    // Was showing all; switch to explicit selection minus this game
+    src.selectedIds = src.games.map(g => g.id).filter(id => id !== gameId);
+  } else {
+    src.selectedIds = src.selectedIds.filter(id => id !== gameId);
+  }
+  if (src.selectedIds.length === 0) {
+    removeSource(sourceId);
+  } else {
+    render(); save();
+    status(`Following ${countGames()} games`);
+  }
+}
+
+function addGameBack(sourceId) {
+  // Open picker for an existing source to add more games
+  const src = sources.find(s => s.id === sourceId);
+  if (!src) return;
+  const data = { tour: {name: src.name.split(' \u2014 ')[0]}, round: {name: src.name.split(' \u2014 ')[1] || '', url: src.roundUrl}, games: src.games };
+  showGamePicker(sourceId, data);
+}
+
+function moveGame(sourceId, gameId, dir) {
+  const src = sources.find(s => s.id === sourceId);
+  if (!src) return;
+  // Ensure we have an explicit selectedIds array to reorder
+  if (!src.selectedIds) {
+    src.selectedIds = src.games.map(g => g.id);
+  }
+  const idx = src.selectedIds.indexOf(gameId);
+  if (idx < 0) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= src.selectedIds.length) return;
+  // Swap
+  [src.selectedIds[idx], src.selectedIds[newIdx]] = [src.selectedIds[newIdx], src.selectedIds[idx]];
+  render(); save();
+}
+
+function showGamePicker(roundId, data, tourName, roundName) {
+  const bg = document.getElementById('modalBg');
+  const body = document.getElementById('modalBody');
+  const title = document.getElementById('modalTitle');
+  title.textContent = 'Select games to follow';
+  bg.style.display = 'flex';
+
+  const tName = tourName || data.tour.name;
+  const rName = roundName || data.round.name;
+  const games = data.games || [];
+  const existing = sources.find(s => s.id === roundId);
+  const alreadySelected = existing?.selectedIds ? new Set(existing.selectedIds) : new Set();
+
+  body.innerHTML = '';
+
+  // Header info
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'margin-bottom:10px;font-size:13px;color:var(--text2)';
+  hdr.textContent = `${tName} \u2014 ${rName} (${games.length} games)`;
+  body.appendChild(hdr);
+
+  // Quick actions
+  const quick = document.createElement('div');
+  quick.className = 'pick-quick';
+  quick.innerHTML = '<button class="btn-sm btn-secondary" id="pickAll">Select all</button><button class="btn-sm btn-secondary" id="pickNone">Select none</button><button class="btn-sm btn-secondary" id="pickLive">Select live only</button>';
+  body.appendChild(quick);
+
+  // Game list
+  const list = document.createElement('div');
+  const checkboxes = [];
+
+  for (const game of games) {
+    const row = document.createElement('label');
+    row.className = 'picker-game';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = game.id;
+    cb.checked = alreadySelected.has(game.id);
+    cb.onchange = updatePickCount;
+    checkboxes.push(cb);
+    row.appendChild(cb);
+
+    const w = game.players?.[0] || {};
+    const b = game.players?.[1] || {};
+
+    const info = document.createElement('span');
+    info.className = 'pg-name';
+    const wFlag = w.fed ? `<span class="pg-flag">${flagImg(w.fed, 20)}</span>` : '';
+    const bFlag = b.fed ? `<span class="pg-flag">${flagImg(b.fed, 20)}</span>` : '';
+    const wTitle = w.title ? `<span class="pg-title">${w.title}</span> ` : '';
+    const bTitle = b.title ? `<span class="pg-title">${b.title}</span> ` : '';
+    const wRat = w.rating ? ` <span class="pg-rating">${w.rating}</span>` : '';
+    const bRat = b.rating ? ` <span class="pg-rating">${b.rating}</span>` : '';
+    info.innerHTML = `${wFlag}${wTitle}${w.name||'?'}${wRat} vs ${bFlag}${bTitle}${b.name||'?'}${bRat}`;
+    row.appendChild(info);
+
+    const st = document.createElement('span');
+    st.className = game.status === '*' ? 'pg-live' : 'pg-status';
+    st.textContent = game.status === '*' ? 'LIVE' : game.status;
+    row.appendChild(st);
+
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+
+  // Actions
+  const actions = document.createElement('div');
+  actions.className = 'picker-actions';
+  actions.innerHTML = '<button id="pickAdd">Add selected</button><button class="btn-secondary" onclick="closeModal()">Cancel</button><span class="pick-count" id="pickCount"></span>';
+  body.appendChild(actions);
+
+  function getChecked() { return checkboxes.filter(cb => cb.checked).map(cb => cb.value); }
+  function updatePickCount() {
+    const n = getChecked().length;
+    document.getElementById('pickCount').textContent = `${n} selected`;
+    document.getElementById('pickAdd').disabled = n === 0;
+  }
+
+  document.getElementById('pickAll').onclick = () => { checkboxes.forEach(cb => cb.checked = true); updatePickCount(); };
+  document.getElementById('pickNone').onclick = () => { checkboxes.forEach(cb => cb.checked = false); updatePickCount(); };
+  document.getElementById('pickLive').onclick = () => {
+    const liveIds = new Set(games.filter(g => g.status === '*').map(g => g.id));
+    checkboxes.forEach(cb => cb.checked = liveIds.has(cb.value));
+    updatePickCount();
+  };
+
+  document.getElementById('pickAdd').onclick = () => {
+    const sel = getChecked();
+    if (!sel.length) return;
+    addSourceWithSelection(roundId, data, sel);
+    closeModal();
+  };
+
+  updatePickCount();
+}
+
+function countGames() {
+  return sources.reduce((n,s) => {
+    if (!s.games?.length) return n;
+    if (s.selectedIds) return n + s.selectedIds.length;
+    return n + s.games.length;
+  }, 0);
+}
+
+/* ======= Polling ======= */
+async function poll() {
+  let changed = false;
+  for (const src of sources) {
+    if (src.type !== 'broadcast-round') continue;
+    try {
+      const data = await apiFetchRound(src.id);
+      src.name = `${data.tour.name} \u2014 ${data.round.name}`;
+      src.roundUrl = data.round.url || src.roundUrl;
+      src.games = data.games || [];
+      changed = true;
+      await sleep(150);
+    } catch(e) { console.warn('poll fail', src.id, e); }
+  }
+  if (changed) {
+    render();
+    const live = sources.reduce((n,s) => {
+      const vis = s.selectedIds ? (s.games||[]).filter(g => s.selectedIds.includes(g.id)) : (s.games||[]);
+      return n + vis.filter(g=>g.status==='*').length;
+    }, 0);
+    const now = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    document.getElementById('updateInfo').textContent = `Updated ${now}`;
+    status(`${live} live / ${countGames()} total`);
+  }
+}
+
+function startPoll() { if(polling) clearInterval(polling); polling = setInterval(poll, POLL_MS); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* ======= FEN / Board ======= */
+function parseFen(fen) {
+  const ranks = fen.split(' ')[0].split('/');
+  const board = [];
+  for (const rank of ranks) {
+    const row = [];
+    for (const ch of rank) {
+      if (ch >= '1' && ch <= '8') for (let i=0;i<+ch;i++) row.push(null);
+      else row.push(ch);
+    }
+    board.push(row);
+  }
+  return board;
+}
+
+function activeColor(fen) { const p = fen.split(' '); return p[1] || 'w'; }
+
+function lastMoveSquares(lm) {
+  if (!lm || lm.length < 4) return [];
+  return [
+    {r: 8 - +lm[1], c: lm.charCodeAt(0)-97},
+    {r: 8 - +lm[3], c: lm.charCodeAt(2)-97}
+  ];
+}
+
+function makeBoard(fen, lm) {
+  const board = parseFen(fen);
+  const hl = lastMoveSquares(lm);
+  const el = document.createElement('div');
+  el.className = 'board';
+  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+    const light = (r+c)%2===0;
+    const hi = hl.some(h => h.r===r && h.c===c);
+    const sq = document.createElement('div');
+    sq.className = 'sq ' + (hi ? (light?'hl':'hd') : (light?'l':'d'));
+    const pc = board[r]?.[c];
+    if (pc && PIECE_MAP[pc]) {
+      if (piecesOk) {
+        const img = document.createElement('img');
+        img.src = `${PIECE_SRC}/${PIECE_MAP[pc]}.svg`;
+        img.alt = PIECE_MAP[pc];
+        img.draggable = false;
+        img.loading = 'lazy';
+        img.onerror = function() { piecesOk = false; reRenderAll(); };
+        sq.appendChild(img);
+      } else {
+        const span = document.createElement('span');
+        span.className = 'pc-uni';
+        span.textContent = UNI[PIECE_MAP[pc]];
+        sq.appendChild(span);
+      }
+    }
+    el.appendChild(sq);
+  }
+  return el;
+}
+
+/* ======= Rendering ======= */
+function render() {
+  const container = document.getElementById('sourceContainer');
+  const empty = document.getElementById('emptyState');
+  const filterBar = document.getElementById('filterBar');
+  const hideFinished = document.getElementById('hideFinished').checked;
+  const ongoingFirst = document.getElementById('ongoingFirst').checked;
+
+  if (!sources.length) {
+    container.innerHTML = '';
+    empty.style.display = '';
+    filterBar.style.display = 'none';
+    return;
+  }
+
+  empty.style.display = 'none';
+  filterBar.style.display = 'flex';
+
+  // Build a map of existing groups
+  const existingGroups = {};
+  container.querySelectorAll('.source-group').forEach(g => { existingGroups[g.dataset.sid] = g; });
+
+  const activeSourceIds = new Set(sources.map(s=>s.id));
+
+  // Remove stale groups
+  for (const [sid, g] of Object.entries(existingGroups)) {
+    if (!activeSourceIds.has(sid)) g.remove();
+  }
+
+  for (let si = 0; si < sources.length; si++) {
+    const src = sources[si];
+    let group = existingGroups[src.id];
+    if (!group) {
+      group = document.createElement('section');
+      group.className = 'source-group';
+      group.dataset.sid = src.id;
+
+      const hdr = document.createElement('div');
+      hdr.className = 'source-header';
+      group.appendChild(hdr);
+
+      const grid = document.createElement('div');
+      grid.className = 'game-grid';
+      group.appendChild(grid);
+      container.appendChild(group);
+    }
+
+    // Update header (rebuild to reflect current index for arrows)
+    const hdr = group.querySelector('.source-header');
+    const sLen = sources.length;
+    hdr.innerHTML = `<div class="reorder-btns" style="margin-right:4px">${sLen > 1 ? `<button onclick="moveSource('${src.id}',-1)" ${si===0?'disabled':''} title="Move up">\u25B2</button><button onclick="moveSource('${src.id}',1)" ${si===sLen-1?'disabled':''} title="Move down">\u25BC</button>` : ''}</div><span class="source-name">${src.name}</span><span class="source-meta"></span><div class="source-btns"><button class="btn-sm btn-secondary" onclick="addGameBack('${src.id}')">Edit</button><button class="btn-danger" onclick="removeSource('${src.id}')">Remove</button></div>`;
+    const allGames = src.games || [];
+    let visibleGames;
+    if (src.selectedIds) {
+      // Preserve selectedIds order
+      const gameMap = Object.fromEntries(allGames.map(g => [g.id, g]));
+      visibleGames = src.selectedIds.map(id => gameMap[id]).filter(Boolean);
+    } else {
+      visibleGames = allGames;
+    }
+    const live = visibleGames.filter(g=>g.status==='*').length;
+    const total = visibleGames.length;
+    group.querySelector('.source-meta').textContent = src.selectedIds
+      ? `${live} live / ${total} selected (${allGames.length} in round)`
+      : `${live} live / ${total} games`;
+
+    // Sort and filter games
+    let games = [...visibleGames];
+    if (hideFinished) games = games.filter(g => g.status === '*');
+    if (ongoingFirst && !src.selectedIds) games.sort((a,b) => {
+      // Only auto-sort if no custom order (selectedIds)
+      if (a.status==='*' && b.status!=='*') return -1;
+      if (a.status!=='*' && b.status==='*') return 1;
+      return 0;
+    });
+
+    const grid = group.querySelector('.game-grid');
+    const existingCards = {};
+    grid.querySelectorAll('.game-card').forEach(c => { existingCards[c.dataset.gid] = c; });
+
+    const newIds = new Set(games.map(g=>g.id));
+    // Remove stale cards
+    for (const [gid, c] of Object.entries(existingCards)) {
+      if (!newIds.has(gid)) c.remove();
+    }
+
+    // Create a document fragment for ordering
+    const frag = document.createDocumentFragment();
+    for (let gi = 0; gi < games.length; gi++) {
+      const game = games[gi];
+      let card = existingCards[game.id];
+      if (card) {
+        // Update if FEN or status changed
+        if (card.dataset.fen !== (game.fen||'') || card.dataset.st !== (game.status||'')) {
+          const newCard = makeCard(game, src, gi, games.length);
+          card.replaceWith(newCard);
+          card = newCard;
+        } else {
+          updateCardClocks(card, game);
+        }
+      } else {
+        card = makeCard(game, src, gi, games.length);
+      }
+      frag.appendChild(card);
+    }
+    grid.innerHTML = '';
+    grid.appendChild(frag);
+
+    // Ensure DOM order matches sources order
+    container.appendChild(group);
+  }
+}
+
+function reRenderAll() {
+  // Force full re-render (e.g. when piece loading fails)
+  const container = document.getElementById('sourceContainer');
+  container.innerHTML = '';
+  render();
+}
+
+function makeCard(game, src, idx, total) {
+  const card = document.createElement('div');
+  card.className = 'game-card' + (game.status !== '*' ? ' finished' : '');
+  card.dataset.gid = game.id;
+  card.dataset.fen = game.fen || '';
+  card.dataset.st = game.status || '';
+
+  const ac = game.fen ? activeColor(game.fen) : 'w';
+  const w = game.players?.[0] || {};
+  const b = game.players?.[1] || {};
+  const isLive = game.status === '*';
+
+  // Remove button
+  const rmBtn = document.createElement('button');
+  rmBtn.className = 'game-remove';
+  rmBtn.textContent = '\u00d7';
+  rmBtn.title = 'Remove this game';
+  rmBtn.onclick = (e) => { e.stopPropagation(); removeGame(src.id, game.id); };
+  card.appendChild(rmBtn);
+
+  // Black player (top)
+  card.appendChild(playerRow(b, ac==='b' && isLive));
+  // Board
+  const wrap = document.createElement('div');
+  wrap.className = 'board-wrap';
+  if (game.fen) wrap.appendChild(makeBoard(game.fen, game.lastMove));
+  if (!isLive && game.status) {
+    const ov = document.createElement('div');
+    ov.className = 'result-overlay';
+    ov.textContent = game.status;
+    wrap.appendChild(ov);
+  }
+  card.appendChild(wrap);
+  // White player (bottom)
+  card.appendChild(playerRow(w, ac==='w' && isLive));
+  // Footer
+  const ft = document.createElement('div');
+  ft.className = 'game-footer';
+  if (isLive) {
+    ft.innerHTML = '<span><span class="live-dot"></span>LIVE</span>';
+  } else {
+    ft.innerHTML = `<span>${game.status||''}</span>`;
+  }
+  // Reorder buttons + think time
+  const right = document.createElement('div');
+  right.className = 'reorder-btns';
+  if (game.thinkTime && isLive) {
+    const tt = document.createElement('span');
+    tt.textContent = fmtClock(game.thinkTime * 100);
+    tt.title = 'Think time';
+    tt.style.cssText = 'margin-right:4px;font-size:10px';
+    right.appendChild(tt);
+  }
+  if (total > 1) {
+    const btnL = document.createElement('button');
+    btnL.textContent = '\u25C0';
+    btnL.title = 'Move left';
+    btnL.disabled = idx === 0;
+    btnL.onclick = (e) => { e.stopPropagation(); moveGame(src.id, game.id, -1); };
+    const btnR = document.createElement('button');
+    btnR.textContent = '\u25B6';
+    btnR.title = 'Move right';
+    btnR.disabled = idx === total - 1;
+    btnR.onclick = (e) => { e.stopPropagation(); moveGame(src.id, game.id, 1); };
+    right.appendChild(btnL);
+    right.appendChild(btnR);
+  }
+  ft.appendChild(right);
+  card.appendChild(ft);
+
+  // Click to open on Lichess
+  card.onclick = () => {
+    const base = src.roundUrl || `${API}/broadcast/-/-/${src.id}`;
+    window.open(`${base}/${game.id}`, '_blank');
+  };
+
+  return card;
+}
+
+function playerRow(p, isActive) {
+  const row = document.createElement('div');
+  row.className = 'player-row' + (isActive ? ' active' : '');
+
+  if (p.fed && flagCode(p.fed)) {
+    const fl = document.createElement('span');
+    fl.className = 'player-flag';
+    fl.innerHTML = flagImg(p.fed);
+    row.appendChild(fl);
+  }
+  if (p.title) {
+    const t = document.createElement('span');
+    t.className = 'player-title';
+    t.textContent = p.title;
+    row.appendChild(t);
+  }
+  const nm = document.createElement('span');
+  nm.className = 'player-name';
+  nm.textContent = p.name || '?';
+  row.appendChild(nm);
+
+  if (p.rating) {
+    const rt = document.createElement('span');
+    rt.className = 'player-rating';
+    rt.textContent = p.rating;
+    row.appendChild(rt);
+  }
+  if (p.clock != null) {
+    const cl = document.createElement('span');
+    const ms = typeof p.clock === 'number' ? p.clock : 0;
+    cl.className = 'player-clock' + (isActive ? ' active' : '') + (ms < 30000 && ms > 0 ? (ms < 6000 ? ' low' : '') : '');
+    cl.textContent = fmtClock(ms);
+    row.appendChild(cl);
+  }
+  return row;
+}
+
+function updateCardClocks(card, game) {
+  const rows = card.querySelectorAll('.player-row');
+  const ac = game.fen ? activeColor(game.fen) : 'w';
+  const isLive = game.status === '*';
+  // rows[0] = black (top), rows[1] = white (bottom)
+  const players = [game.players?.[1], game.players?.[0]]; // [black, white]
+  const colors = ['b', 'w'];
+  rows.forEach((row, i) => {
+    const p = players[i];
+    if (!p) return;
+    const active = ac === colors[i] && isLive;
+    row.classList.toggle('active', active);
+    const cl = row.querySelector('.player-clock');
+    if (cl && p.clock != null) {
+      const ms = p.clock;
+      cl.textContent = fmtClock(ms);
+      cl.className = 'player-clock' + (active ? ' active' : '') + (ms < 30000 && ms > 0 ? (ms < 6000 ? ' low' : '') : '');
+    }
+  });
+}
+
+function fmtClock(cs) {
+  if (cs == null || cs < 0) return '';
+  const s = Math.floor(cs/100);  // centiseconds to seconds
+  const h = Math.floor(s/3600);
+  const m = Math.floor((s%3600)/60);
+  const sec = s%60;
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+/* ======= Board size ======= */
+function setSize(sz) {
+  document.documentElement.style.setProperty('--board-min', SIZES[sz]);
+  document.querySelectorAll('.size-btns button').forEach(b => b.classList.remove('on'));
+  document.getElementById('sz'+sz.toUpperCase()).classList.add('on');
+  localStorage.setItem('lspc-sz', sz);
+}
+
+/* ======= Browse modal ======= */
+async function openBrowse() {
+  const bg = document.getElementById('modalBg');
+  const body = document.getElementById('modalBody');
+  bg.style.display = 'flex';
+  body.innerHTML = '<div style="text-align:center;padding:24px"><span class="spinner"></span> Loading broadcasts...</div>';
+
+  try {
+    const bcs = await apiFetchBroadcasts(40);
+    if (!bcs.length) { body.innerHTML = '<p>No broadcasts found.</p>'; return; }
+    body.innerHTML = '';
+    for (const bc of bcs) {
+      const item = document.createElement('div');
+      item.className = 'bc-item';
+
+      const name = document.createElement('div');
+      name.className = 'bc-name';
+      name.textContent = bc.tour.name;
+
+      const info = document.createElement('div');
+      info.className = 'bc-info';
+      const rounds = bc.rounds || [];
+      const liveRounds = rounds.filter(r => r.ongoing);
+      info.textContent = `${rounds.length} rounds` + (liveRounds.length ? ` \u00b7 ${liveRounds.length} live` : '');
+
+      const rl = document.createElement('div');
+      rl.className = 'round-list';
+      // Show live rounds first, then last few
+      const shown = new Set();
+      const toShow = [];
+      for (const r of liveRounds) { toShow.push(r); shown.add(r.id); }
+      for (const r of rounds.slice(-6)) { if (!shown.has(r.id)) { toShow.push(r); shown.add(r.id); } }
+
+      for (const round of toShow) {
+        const btn = document.createElement('button');
+        btn.className = 'round-btn' + (round.ongoing ? ' live' : '');
+        btn.textContent = round.name + (round.ongoing ? ' \ud83d\udd34' : '');
+        btn.onclick = async () => {
+          btn.disabled = true;
+          const orig = btn.textContent;
+          btn.textContent = '...';
+          try {
+            const ok = await addRound(round.id, bc.tour.name, round.name);
+            btn.textContent = ok ? '\u2713 Added' : orig;
+          } catch(e) {
+            toast('Failed: ' + e.message, true);
+            btn.textContent = orig;
+            btn.disabled = false;
+          }
+        };
+        rl.appendChild(btn);
+      }
+
+      item.appendChild(name);
+      item.appendChild(info);
+      item.appendChild(rl);
+      body.appendChild(item);
+    }
+  } catch(e) {
+    body.innerHTML = `<p style="color:#e74c3c">Error: ${e.message}</p>`;
+  }
+}
+
+function closeModal() { document.getElementById('modalBg').style.display = 'none'; }
+
+/* ======= Persistence ======= */
+function save() {
+  const data = sources.map(s => ({type:s.type, id:s.id, name:s.name, selectedIds:s.selectedIds||null}));
+  localStorage.setItem('lspc-sources', JSON.stringify(data));
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem('lspc-sources');
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+/* ======= Toast / Status ======= */
+function toast(msg, err) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = document.createElement('div');
+  t.className = 'toast' + (err ? ' err' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+function status(txt) { document.getElementById('statusText').textContent = txt; }
+
+/* ======= Init ======= */
+async function init() {
+  // Board size
+  setSize(localStorage.getItem('lspc-sz') || 'm');
+
+  // Load saved sources
+  const saved = load();
+  if (saved.length) {
+    status('Loading saved games...');
+    for (const s of saved) {
+      try {
+        const data = await apiFetchRound(s.id);
+        sources.push({
+          type: 'broadcast-round', id: s.id,
+          name: `${data.tour.name} \u2014 ${data.round.name}`,
+          roundUrl: data.round.url || '',
+          games: data.games || [],
+          selectedIds: s.selectedIds || null
+        });
+        await sleep(100);
+      } catch(e) {
+        console.warn('Failed to reload', s.id, e);
+        sources.push({...s, games: [], selectedIds: s.selectedIds || null});
+      }
+    }
+    render();
+    const live = sources.reduce((n,s) => n + (s.games?.filter(g=>g.status==='*').length||0), 0);
+    status(`${live} live / ${countGames()} total`);
+  }
+
+  startPoll();
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+init();
+</script>
+</body>
+</html>
