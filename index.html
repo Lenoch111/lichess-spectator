@@ -180,7 +180,9 @@ main{padding:16px;padding-bottom:44px}
 .pg-flag img{height:12px;border-radius:1px;vertical-align:middle}
 
 /* Favorites */
-.player-star{color:var(--accent2);margin-right:2px;font-size:10px;flex-shrink:0}
+.player-star-btn{background:transparent;border:none;padding:0;margin-right:3px;font-size:12px;line-height:1;cursor:pointer;color:var(--text2);opacity:.5;flex-shrink:0}
+.player-star-btn:hover{opacity:1;color:var(--accent2)}
+.player-star-btn.on{opacity:1;color:var(--accent2)}
 .card-fav-badge{position:absolute;top:2px;left:2px;font-size:10px;color:var(--accent2);background:rgba(0,0,0,.6);border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;z-index:2}
 .fav-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
 .fav-row:last-child{border-bottom:none}
@@ -658,6 +660,7 @@ function addFavorite(name) {
   favorites.push(n);
   saveFavorites(); rebuildFavSet();
   renderFavoritesList();
+  reRenderAll();
   scanFavorites();
 }
 
@@ -665,6 +668,7 @@ function removeFavorite(name) {
   favorites = favorites.filter(f => f !== name);
   saveFavorites(); rebuildFavSet();
   renderFavoritesList();
+  reRenderAll();
   scanFavorites();
 }
 
@@ -1053,11 +1057,16 @@ function playerRow(p, isActive) {
     t.textContent = p.title;
     row.appendChild(t);
   }
-  if (isFavoritePlayer(p.name)) {
-    const st = document.createElement('span');
-    st.className = 'player-star';
+  if (p.name) {
+    const fav = isFavoritePlayer(p.name);
+    const st = document.createElement('button');
+    st.className = 'player-star-btn' + (fav ? ' on' : '');
     st.textContent = '★';
-    st.title = 'Favorite player';
+    st.title = fav ? 'Remove from favorites' : 'Add to favorites';
+    st.onclick = (e) => {
+      e.stopPropagation();
+      if (fav) removeFavorite(p.name); else addFavorite(p.name);
+    };
     row.appendChild(st);
   }
   const nm = document.createElement('span');
