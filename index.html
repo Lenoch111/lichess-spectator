@@ -172,6 +172,17 @@ main{padding:16px;padding-bottom:44px}
 .player-flag img{height:11px;border-radius:1px}
 .pg-flag{margin-right:3px}
 .pg-flag img{height:12px;border-radius:1px;vertical-align:middle}
+
+/* Favorites */
+.player-star{color:var(--accent2);margin-right:2px;font-size:10px;flex-shrink:0}
+.card-fav-badge{position:absolute;top:2px;left:2px;font-size:10px;color:var(--accent2);background:rgba(0,0,0,.6);border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;z-index:2}
+.fav-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
+.fav-row:last-child{border-bottom:none}
+.fav-name{font-size:14px}
+.fav-status{font-size:11px;color:var(--text2);margin:8px 0 4px}
+#favInput{flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px}
+#favInput:focus{outline:none;border-color:var(--accent)}
+#favInput::placeholder{color:var(--text2)}
 </style>
 </head>
 <body>
@@ -187,6 +198,7 @@ main{padding:16px;padding-bottom:44px}
       onkeydown="if(event.key==='Enter')addFromInput()">
     <button onclick="addFromInput()" id="addBtn">Add</button>
     <button class="btn-secondary" onclick="openBrowse()">Browse</button>
+    <button class="btn-secondary" onclick="openFavorites()">&#9733; Favorites</button>
   </div>
 </header>
 
@@ -229,6 +241,7 @@ main{padding:16px;padding-bottom:44px}
 const PIECE_SRC = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett';
 const API = 'https://lichess.org';
 const POLL_MS = 5000;
+const FAVORITES_SCAN_MS = 30000;
 const SIZES = {s:'160px',m:'220px',l:'300px'};
 const PIECE_MAP = {
   K:'wK',Q:'wQ',R:'wR',B:'wB',N:'wN',P:'wP',
@@ -276,6 +289,14 @@ function flagImg(fed, size) {
 let sources = [];   // [{type,id,name,roundUrl,games:[...],selectedIds:[...]}]
 let polling = null;
 let piecesOk = true; // assume SVG pieces load, flip on first error
+
+/* ======= Favorites state ======= */
+let favorites = [];      // array of favorite player names, as entered
+let favSet = new Set();  // lowercased, for matching
+const favoritesSource = {type:'favorites', id:'__favorites__', name:'★ Favorites', roundUrl:'', games:[], selectedIds:null};
+let favoritesTimer = null;
+let favoritesScanning = false;
+let favoritesLastScan = null;
 
 const STATUS_DEFS = [
   {key:'live', label:'Live'},
@@ -613,6 +634,130 @@ async function poll() {
 function startPoll() { if(polling) clearInterval(polling); polling = setInterval(poll, POLL_MS); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+/* ======= Favorites ======= */
+function loadFavorites() {
+  try {
+    const raw = localStorage.getItem('lspc-favorites');
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+function saveFavorites() { localStorage.setItem('lspc-favorites', JSON.stringify(favorites)); }
+function rebuildFavSet() { favSet = new Set(favorites.map(f => f.toLowerCase())); }
+function isFavoritePlayer(name) { return !!name && favSet.has(name.toLowerCase()); }
+
+function addFavorite(name) {
+  const n = (name || '').trim();
+  if (!n) return;
+  if (favorites.some(f => f.toLowerCase() === n.toLowerCase())) { toast('Already in favorites', true); return; }
+  favorites.push(n);
+  saveFavorites(); rebuildFavSet();
+  renderFavoritesList();
+  scanFavorites();
+}
+
+function removeFavorite(name) {
+  favorites = favorites.filter(f => f !== name);
+  saveFavorites(); rebuildFavSet();
+  renderFavoritesList();
+  scanFavorites();
+}
+
+function openFavorites() {
+  const bg = document.getElementById('modalBg');
+  const body = document.getElementById('modalBody');
+  const title = document.getElementById('modalTitle');
+  title.textContent = 'Favorite Players';
+  bg.style.display = 'flex';
+
+  body.innerHTML = `
+    <div class="bc-search-row" style="display:flex;gap:8px">
+      <input type="text" id="favInput" placeholder="Player name, exact as shown on Lichess">
+      <button id="favAddBtn">Add</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin:8px 0 4px">Their live broadcast games are added automatically, checked every ${FAVORITES_SCAN_MS/1000}s.</p>
+    <div id="favListWrap"></div>`;
+
+  const input = document.getElementById('favInput');
+  document.getElementById('favAddBtn').onclick = () => { addFavorite(input.value); input.value = ''; input.focus(); };
+  input.onkeydown = (e) => { if (e.key === 'Enter') { addFavorite(input.value); input.value = ''; } };
+
+  renderFavoritesList();
+}
+
+function renderFavoritesList() {
+  const wrap = document.getElementById('favListWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const status = document.createElement('p');
+  status.className = 'fav-status';
+  status.textContent = favoritesScanning
+    ? 'Scanning live broadcasts...'
+    : (favoritesLastScan ? `Last checked ${favoritesLastScan.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}` : '');
+  wrap.appendChild(status);
+
+  if (!favorites.length) {
+    const p = document.createElement('p');
+    p.style.cssText = 'font-size:13px;color:var(--text2)';
+    p.textContent = 'No favorite players yet.';
+    wrap.appendChild(p);
+    return;
+  }
+
+  for (const name of favorites) {
+    const row = document.createElement('div');
+    row.className = 'fav-row';
+    const nm = document.createElement('span');
+    nm.className = 'fav-name';
+    nm.textContent = name;
+    const rm = document.createElement('button');
+    rm.className = 'btn-danger';
+    rm.textContent = 'Remove';
+    rm.onclick = () => removeFavorite(name);
+    row.appendChild(nm);
+    row.appendChild(rm);
+    wrap.appendChild(row);
+  }
+}
+
+async function scanFavorites() {
+  if (!favorites.length) {
+    favoritesSource.games = [];
+    render();
+    return;
+  }
+  favoritesScanning = true;
+  renderFavoritesList();
+  try {
+    const data = await apiFetchBroadcastsTop(1);
+    const liveItems = (data.active || []).filter(item => item.round && roundStatus(item.round) === 'live');
+    const matched = [];
+    for (const item of liveItems) {
+      try {
+        const rd = await apiFetchRound(item.round.id);
+        const roundUrl = rd.round.url || '';
+        for (const game of (rd.games || [])) {
+          const w = game.players?.[0], b = game.players?.[1];
+          if (isFavoritePlayer(w?.name) || isFavoritePlayer(b?.name)) {
+            matched.push({...game, _roundUrl: roundUrl, _roundId: item.round.id});
+          }
+        }
+        await sleep(150);
+      } catch(e) { console.warn('favorites scan round fail', item.round.id, e); }
+    }
+    favoritesSource.games = matched;
+    favoritesLastScan = new Date();
+  } catch(e) {
+    console.warn('favorites scan failed', e);
+  } finally {
+    favoritesScanning = false;
+    renderFavoritesList();
+    render();
+  }
+}
+
+function startFavoritesPoll() { if (favoritesTimer) clearInterval(favoritesTimer); favoritesTimer = setInterval(scanFavorites, FAVORITES_SCAN_MS); }
+
 /* ======= FEN / Board ======= */
 function parseFen(fen) {
   const ranks = fen.split(' ')[0].split('/');
@@ -678,7 +823,9 @@ function render() {
   const hideFinished = document.getElementById('hideFinished').checked;
   const ongoingFirst = document.getElementById('ongoingFirst').checked;
 
-  if (!sources.length) {
+  const groups = favorites.length ? [favoritesSource, ...sources] : sources;
+
+  if (!groups.length) {
     container.innerHTML = '';
     empty.style.display = '';
     filterBar.style.display = 'none';
@@ -692,15 +839,17 @@ function render() {
   const existingGroups = {};
   container.querySelectorAll('.source-group').forEach(g => { existingGroups[g.dataset.sid] = g; });
 
-  const activeSourceIds = new Set(sources.map(s=>s.id));
+  const activeSourceIds = new Set(groups.map(s=>s.id));
 
   // Remove stale groups
   for (const [sid, g] of Object.entries(existingGroups)) {
     if (!activeSourceIds.has(sid)) g.remove();
   }
 
-  for (let si = 0; si < sources.length; si++) {
-    const src = sources[si];
+  for (let gpi = 0; gpi < groups.length; gpi++) {
+    const src = groups[gpi];
+    const isFav = src.type === 'favorites';
+    const si = isFav ? -1 : sources.indexOf(src);
     let group = existingGroups[src.id];
     if (!group) {
       group = document.createElement('section');
@@ -720,7 +869,11 @@ function render() {
     // Update header (rebuild to reflect current index for arrows)
     const hdr = group.querySelector('.source-header');
     const sLen = sources.length;
-    hdr.innerHTML = `<div class="reorder-btns" style="margin-right:4px">${sLen > 1 ? `<button onclick="moveSource('${src.id}',-1)" ${si===0?'disabled':''} title="Move up">\u25B2</button><button onclick="moveSource('${src.id}',1)" ${si===sLen-1?'disabled':''} title="Move down">\u25BC</button>` : ''}</div><span class="source-name">${src.name}</span><span class="source-meta"></span><div class="source-btns"><button class="btn-sm btn-secondary" onclick="addGameBack('${src.id}')">Edit</button><button class="btn-danger" onclick="removeSource('${src.id}')">Remove</button></div>`;
+    if (isFav) {
+      hdr.innerHTML = `<span class="source-name">${src.name}</span><span class="source-meta"></span><div class="source-btns"><button class="btn-sm btn-secondary" onclick="openFavorites()">Manage</button></div>`;
+    } else {
+      hdr.innerHTML = `<div class="reorder-btns" style="margin-right:4px">${sLen > 1 ? `<button onclick="moveSource('${src.id}',-1)" ${si===0?'disabled':''} title="Move up">\u25B2</button><button onclick="moveSource('${src.id}',1)" ${si===sLen-1?'disabled':''} title="Move down">\u25BC</button>` : ''}</div><span class="source-name">${src.name}</span><span class="source-meta"></span><div class="source-btns"><button class="btn-sm btn-secondary" onclick="addGameBack('${src.id}')">Edit</button><button class="btn-danger" onclick="removeSource('${src.id}')">Remove</button></div>`;
+    }
     const allGames = src.games || [];
     let visibleGames;
     if (src.selectedIds) {
@@ -801,14 +954,23 @@ function makeCard(game, src, idx, total) {
   const w = game.players?.[0] || {};
   const b = game.players?.[1] || {};
   const isLive = game.status === '*';
+  const isFavCard = src.type === 'favorites';
 
-  // Remove button
-  const rmBtn = document.createElement('button');
-  rmBtn.className = 'game-remove';
-  rmBtn.textContent = '\u00d7';
-  rmBtn.title = 'Remove this game';
-  rmBtn.onclick = (e) => { e.stopPropagation(); removeGame(src.id, game.id); };
-  card.appendChild(rmBtn);
+  if (isFavCard) {
+    const badge = document.createElement('div');
+    badge.className = 'card-fav-badge';
+    badge.title = 'Favorite player';
+    badge.textContent = '\u2605';
+    card.appendChild(badge);
+  } else {
+    // Remove button
+    const rmBtn = document.createElement('button');
+    rmBtn.className = 'game-remove';
+    rmBtn.textContent = '\u00d7';
+    rmBtn.title = 'Remove this game';
+    rmBtn.onclick = (e) => { e.stopPropagation(); removeGame(src.id, game.id); };
+    card.appendChild(rmBtn);
+  }
 
   // Black player (top)
   card.appendChild(playerRow(b, ac==='b' && isLive));
@@ -843,7 +1005,7 @@ function makeCard(game, src, idx, total) {
     tt.style.cssText = 'margin-right:4px;font-size:10px';
     right.appendChild(tt);
   }
-  if (total > 1) {
+  if (total > 1 && !isFavCard) {
     const btnL = document.createElement('button');
     btnL.textContent = '\u25C0';
     btnL.title = 'Move left';
@@ -862,7 +1024,7 @@ function makeCard(game, src, idx, total) {
 
   // Click to open on Lichess
   card.onclick = () => {
-    const base = src.roundUrl || `${API}/broadcast/-/-/${src.id}`;
+    const base = game._roundUrl || src.roundUrl || `${API}/broadcast/-/-/${game._roundId || src.id}`;
     window.open(`${base}/${game.id}`, '_blank');
   };
 
@@ -884,6 +1046,13 @@ function playerRow(p, isActive) {
     t.className = 'player-title';
     t.textContent = p.title;
     row.appendChild(t);
+  }
+  if (isFavoritePlayer(p.name)) {
+    const st = document.createElement('span');
+    st.className = 'player-star';
+    st.textContent = '★';
+    st.title = 'Favorite player';
+    row.appendChild(st);
   }
   const nm = document.createElement('span');
   nm.className = 'player-name';
@@ -1253,6 +1422,10 @@ async function init() {
   // Board size
   setSize(localStorage.getItem('lspc-sz') || 'm');
 
+  // Load favorites
+  favorites = loadFavorites();
+  rebuildFavSet();
+
   // Load saved sources
   const saved = load();
   if (saved.length) {
@@ -1279,6 +1452,9 @@ async function init() {
   }
 
   startPoll();
+
+  if (favorites.length) await scanFavorites();
+  startFavoritesPoll();
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
