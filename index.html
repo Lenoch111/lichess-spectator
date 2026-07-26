@@ -120,6 +120,12 @@ main{padding:16px;padding-bottom:44px}
 .bc-live-tag{margin-left:8px;font-size:10px;font-weight:700;letter-spacing:.5px;color:#fff;background:#e74c3c;padding:2px 7px;border-radius:10px;vertical-align:middle;display:inline-flex;align-items:center;gap:4px}
 .bc-live-tag .live-dot{background:#fff}
 
+/* Broadcast group category tabs */
+.bc-cat-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+.bc-cat-btn{padding:3px 10px;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text2);cursor:pointer}
+.bc-cat-btn:hover{border-color:var(--accent)}
+.bc-cat-btn.on{border-color:var(--accent);background:rgba(98,153,36,.2);color:var(--text)}
+
 /* Toast */
 .toast{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);padding:8px 20px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:13px;z-index:300;animation:fadeUp .3s ease}
 .toast.err{border-color:#e74c3c;color:#e74c3c}
@@ -1320,10 +1326,38 @@ function renderRoundsList(panelEl, tourName, data) {
   const rounds = data.rounds || [];
   panelEl.innerHTML = '';
 
+  const siblings = data.group?.tours || [];
+  if (siblings.length > 1) {
+    const catBar = document.createElement('div');
+    catBar.className = 'bc-cat-tabs';
+    for (const t of siblings) {
+      const tb = document.createElement('button');
+      tb.className = 'bc-cat-btn' + (t.id === data.tour.id ? ' on' : '');
+      tb.textContent = t.name + (t.live ? ' 🔴' : '');
+      tb.onclick = async () => {
+        if (t.id === data.tour.id) return;
+        panelEl.innerHTML = '<div style="padding:8px"><span class="spinner"></span> Loading...</div>';
+        try {
+          const newData = await apiFetchTournament(t.id);
+          if (!panelEl.isConnected) return; // panel closed meanwhile
+          renderRoundsList(panelEl, newData.tour.name, newData);
+        } catch(e) {
+          panelEl.innerHTML = '';
+          const p = document.createElement('p');
+          p.style.color = '#e74c3c';
+          p.textContent = 'Error loading category: ' + e.message;
+          panelEl.appendChild(p);
+        }
+      };
+      catBar.appendChild(tb);
+    }
+    panelEl.appendChild(catBar);
+  }
+
   if (!rounds.length) {
     const p = document.createElement('p');
     p.style.cssText = 'font-size:12px;color:var(--text2)';
-    p.textContent = 'No rounds available for this tournament.';
+    p.textContent = 'No rounds available for this category.';
     panelEl.appendChild(p);
     return;
   }
