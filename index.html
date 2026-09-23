@@ -427,10 +427,12 @@ function parseInput(raw) {
   let s = raw.trim().replace(/\/+$/,'');
   if (!s) return null;
 
+  // Raw 8-char ID
+  if (/^[A-Za-z0-9]{8}$/.test(s)) return {type:'round', id:s};
+
   // Try as URL
   try {
-    if (!/^https?:\/\//.test(s)) s = 'https://' + s;
-    const u = new URL(s);
+    const u = new URL(/^https?:\/\//.test(s) ? s : 'https://' + s);
     if (!u.hostname.includes('lichess.org')) return null;
     const p = u.pathname.split('/').filter(Boolean);
 
@@ -450,9 +452,6 @@ function parseInput(raw) {
       return {type:'round', id:p[0].slice(0,8)}; // try as round first
     }
   } catch(e) {/* not a URL */}
-
-  // Raw 8-char ID
-  if (/^[A-Za-z0-9]{8}$/.test(s)) return {type:'round', id:s};
 
   return null;
 }
