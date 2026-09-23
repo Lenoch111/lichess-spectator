@@ -333,6 +333,22 @@ let browseState = {
 };
 
 /* ======= API ======= */
+/* `fetch` rejects with a bare "Failed to fetch" for anything that never reached
+   Lichess at all - a dropped connection, a blocked request, DNS. Retry once,
+   since most of those are a blip, then say what actually went wrong. */
+async function apiFetch(url, tries = 2) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    try { return await fetch(url); }
+    catch(e) { last = e; if (i + 1 < tries) await sleep(600); }
+  }
+  const err = new Error('Could not reach Lichess — check your connection, '
+    + 'or an ad blocker / VPN may be blocking lichess.org');
+  err.network = true;
+  err.cause = last;
+  throw err;
+}
+
 let roundBucket = [];      // timestamps of recent round requests, one rolling minute
 let rateLimitUntil = 0;    // while in the future, no round request is even attempted
 const roundCache = new Map();   // rid -> {at, data}, so one tick never asks twice
@@ -362,7 +378,7 @@ async function apiFetchRound(rid) {
   if (hit && Date.now() - hit.at < ROUND_CACHE_MS) return hit.data;
 
   await roundGate();
-  const r = await fetch(`${API}/api/broadcast/-/-/${rid}`);
+  const r = await apiFetch(`${API}/api/broadcast/-/-/${rid}`);
   if (r.status === 429) {
     rateLimitUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
     roundBucket = [];
@@ -381,7 +397,7 @@ async function apiFetchRound(rid) {
 }
 
 async function apiFetchBroadcastsTop(page=1) {
-  const r = await fetch(`${API}/api/broadcast/top?page=${page}`);
+  const r = await apiFetch(`${API}/api/broadcast/top?page=${page}`);
   if (!r.ok) throw new Error(`Failed (${r.status})`);
   return r.json();
 }
@@ -390,20 +406,20 @@ async function apiFetchBroadcastsTop(page=1) {
    The plain list endpoint carries every official broadcast with its rounds, which
    is what favourite players actually need. It ignores `page` but honours `nb`. */
 async function apiFetchBroadcastList(nb = BROADCAST_LIST_NB) {
-  const r = await fetch(`${API}/api/broadcast?nb=${nb}`);
+  const r = await apiFetch(`${API}/api/broadcast?nb=${nb}`);
   if (!r.ok) throw new Error(`Failed (${r.status})`);
   const text = await r.text();
   return text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l));
 }
 
 async function apiSearchBroadcasts(query, page=1) {
-  const r = await fetch(`${API}/api/broadcast/search?q=${encodeURIComponent(query)}&page=${page}`);
+  const r = await apiFetch(`${API}/api/broadcast/search?q=${encodeURIComponent(query)}&page=${page}`);
   if (!r.ok) throw new Error(`Failed (${r.status})`);
   return r.json();
 }
 
 async function apiFetchTournament(tourId) {
-  const r = await fetch(`${API}/api/broadcast/${tourId}`);
+  const r = await apiFetch(`${API}/api/broadcast/${tourId}`);
   if (!r.ok) throw new Error(`Tournament not found (${r.status})`);
   return r.json();
 }
@@ -1395,8 +1411,14 @@ async function runBrowseSearch(query) {
     results.innerHTML = '';
     const p = document.createElement('p');
     p.style.color = '#e74c3c';
-    p.textContent = 'Error: ' + e.message;
+    p.textContent = e.network ? e.message : 'Error: ' + e.message;
     results.appendChild(p);
+    const again = document.createElement('button');
+    again.className = 'btn-secondary';
+    again.style.marginTop = '8px';
+    again.textContent = 'Try again';
+    again.onclick = () => runBrowseSearch(browseState.query);
+    results.appendChild(again);
   }
 }
 
