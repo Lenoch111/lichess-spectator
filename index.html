@@ -187,6 +187,8 @@ main{padding:16px;padding-bottom:44px}
 .fav-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
 .fav-row:last-child{border-bottom:none}
 .fav-name{font-size:14px}
+.fav-hit{font-size:11px;color:var(--accent2);margin-top:2px}
+.fav-miss{font-size:11px;color:var(--text2);margin-top:2px}
 .fav-status{font-size:11px;color:var(--text2);margin:8px 0 4px}
 #favInput{flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px}
 #favInput:focus{outline:none;border-color:var(--accent)}
@@ -249,7 +251,16 @@ main{padding:16px;padding-bottom:44px}
 const PIECE_SRC = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett';
 const API = 'https://lichess.org';
 const POLL_MS = 5000;
-const FAVORITES_SCAN_MS = 30000;
+const FAVORITES_SCAN_MS = 60000;   // full sweep is expensive; matched rounds refresh on POLL_MS
+const BROADCAST_LIST_NB = 100;      // Lichess caps the list endpoint here anyway
+const FAVORITES_MAX_ROUNDS = 25;    // safety valve so one scan cannot run away
+const FAVORITES_ROUND_DELAY_MS = 250;
+/* The round endpoint is the one Lichess meters hard for anonymous callers: go
+   over it and every request comes back 429 for a minute or so. Keep our own
+   budget below that, and back off completely once Lichess says no. */
+const ROUND_RPM = 18;
+const RATE_LIMIT_COOLDOWN_MS = 70000;
+const ROUND_CACHE_MS = 2500;
 const SIZES = {s:'160px',m:'220px',l:'300px'};
 const PIECE_MAP = {
   K:'wK',Q:'wQ',R:'wR',B:'wB',N:'wN',P:'wP',
@@ -300,7 +311,10 @@ let piecesOk = true; // assume SVG pieces load, flip on first error
 
 /* ======= Favorites state ======= */
 let favorites = [];      // array of favorite player names, as entered
-let favSet = new Set();  // lowercased, for matching
+let favParsed = [];     // [{raw, tokens:[...]}] derived from `favorites`, for matching
+let favMatches = {};    // raw favorite name -> array of player names it matched in the last scan
+let favScanInfo = null; // {rounds, games} counts from the last scan
+let favRoundIds = [];   // rounds that actually held a favourite's game, refreshed on every poll
 const favoritesSource = {type:'favorites', id:'__favorites__', name:'★ Favorites', roundUrl:'', games:[], selectedIds:null};
 let favoritesTimer = null;
 let favoritesScanning = false;
@@ -319,16 +333,67 @@ let browseState = {
 };
 
 /* ======= API ======= */
+let roundBucket = [];      // timestamps of recent round requests, one rolling minute
+let rateLimitUntil = 0;    // while in the future, no round request is even attempted
+const roundCache = new Map();   // rid -> {at, data}, so one tick never asks twice
+
+function rateLimitError() {
+  const wait = Math.max(1, Math.ceil((rateLimitUntil - Date.now()) / 1000));
+  const err = new Error(`Lichess is rate limiting — retrying in ${wait}s`);
+  err.status = 429;
+  return err;
+}
+function isRateLimited() { return Date.now() < rateLimitUntil; }
+
+/* Wait for a slot in our own budget. Throws instead of waiting while Lichess
+   has us in timeout, so a failing poll cannot queue up behind itself. */
+async function roundGate() {
+  for (;;) {
+    if (isRateLimited()) throw rateLimitError();
+    const now = Date.now();
+    roundBucket = roundBucket.filter(t => now - t < 60000);
+    if (roundBucket.length < ROUND_RPM) { roundBucket.push(now); return; }
+    await sleep(Math.min(5000, Math.max(250, 60000 - (now - roundBucket[0]))));
+  }
+}
+
 async function apiFetchRound(rid) {
+  const hit = roundCache.get(rid);
+  if (hit && Date.now() - hit.at < ROUND_CACHE_MS) return hit.data;
+
+  await roundGate();
   const r = await fetch(`${API}/api/broadcast/-/-/${rid}`);
-  if (!r.ok) throw new Error(`Round not found (${r.status})`);
-  return r.json();
+  if (r.status === 429) {
+    rateLimitUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    roundBucket = [];
+    throw rateLimitError();
+  }
+  if (!r.ok) {
+    const err = new Error(r.status === 404
+      ? 'Round not found — check the link or ID'
+      : `Round failed (${r.status})`);
+    err.status = r.status;
+    throw err;
+  }
+  const data = await r.json();
+  roundCache.set(rid, {at: Date.now(), data});
+  return data;
 }
 
 async function apiFetchBroadcastsTop(page=1) {
   const r = await fetch(`${API}/api/broadcast/top?page=${page}`);
   if (!r.ok) throw new Error(`Failed (${r.status})`);
   return r.json();
+}
+
+/* `/api/broadcast/top` only returns the handful of tournaments Lichess features.
+   The plain list endpoint carries every official broadcast with its rounds, which
+   is what favourite players actually need. It ignores `page` but honours `nb`. */
+async function apiFetchBroadcastList(nb = BROADCAST_LIST_NB) {
+  const r = await fetch(`${API}/api/broadcast?nb=${nb}`);
+  if (!r.ok) throw new Error(`Failed (${r.status})`);
+  const text = await r.text();
+  return text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l));
 }
 
 async function apiSearchBroadcasts(query, page=1) {
@@ -415,7 +480,7 @@ async function addFromInput() {
       showGamePicker(roundId, data);
     }
   } catch(e) {
-    toast('Failed: ' + e.message, true);
+    toast(e.status === 429 ? e.message : 'Failed: ' + e.message, true);
   } finally {
     btn.disabled = false; btn.textContent = 'Add';
   }
@@ -614,7 +679,16 @@ function countGames() {
 }
 
 /* ======= Polling ======= */
+let pollRunning = false;
 async function poll() {
+  if (pollRunning) return;        // a slow tick must not stack on the next one
+  if (isRateLimited()) {
+    const wait = Math.ceil((rateLimitUntil - Date.now()) / 1000);
+    status(`Lichess is rate limiting — resuming in ${wait}s`);
+    return;
+  }
+  pollRunning = true;
+  try {
   let changed = false;
   for (const src of sources) {
     if (src.type !== 'broadcast-round') continue;
@@ -625,9 +699,13 @@ async function poll() {
       src.games = data.games || [];
       changed = true;
       await sleep(150);
-    } catch(e) { console.warn('poll fail', src.id, e); }
+    } catch(e) {
+      console.warn('poll fail', src.id, e);
+      if (e.status === 429) break;
+    }
   }
-  if (changed) {
+  const favChanged = await refreshFavoriteRounds();
+  if (changed || favChanged) {
     render();
     const live = sources.reduce((n,s) => {
       const vis = s.selectedIds ? (s.games||[]).filter(g => s.selectedIds.includes(g.id)) : (s.games||[]);
@@ -637,6 +715,7 @@ async function poll() {
     document.getElementById('updateInfo').textContent = `Updated ${now}`;
     status(`${live} live / ${countGames()} total`);
   }
+  } finally { pollRunning = false; }
 }
 
 function startPoll() { if(polling) clearInterval(polling); polling = setInterval(poll, POLL_MS); }
@@ -650,13 +729,48 @@ function loadFavorites() {
   } catch(e) { return []; }
 }
 function saveFavorites() { localStorage.setItem('lspc-favorites', JSON.stringify(favorites)); }
-function rebuildFavSet() { favSet = new Set(favorites.map(f => f.toLowerCase())); }
-function isFavoritePlayer(name) { return !!name && favSet.has(name.toLowerCase()); }
+/* Lichess writes broadcast players as "Surname, Forename", so an exact string
+   compare fails for anything typed by hand. Normalise away case, diacritics and
+   punctuation, then match on words in any order. */
+function normalizeName(s) {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function nameTokens(s) { const n = normalizeName(s); return n ? n.split(' ') : []; }
+
+function rebuildFavSet() {
+  favParsed = favorites.map(raw => ({raw, tokens: nameTokens(raw)}))
+                       .filter(f => f.tokens.some(t => t.length > 1));
+}
+
+/* Every word the user typed must appear in the player's name; a single letter
+   counts as an initial. At least one real word has to match, so "D" alone
+   never matches everyone. */
+function tokensMatch(favTokens, playerTokens) {
+  if (!favTokens.length || !playerTokens.length) return false;
+  let solidHit = false;
+  for (const ft of favTokens) {
+    const hit = playerTokens.find(pt =>
+      pt === ft ||
+      (ft.length === 1 && pt.startsWith(ft)) ||
+      (pt.length === 1 && ft.startsWith(pt)));
+    if (!hit) return false;
+    if (ft.length > 1 && hit.length > 1) solidHit = true;
+  }
+  return solidHit;
+}
+
+function matchingFavorites(name) {
+  const pt = nameTokens(name);
+  if (!pt.length) return [];
+  return favParsed.filter(f => tokensMatch(f.tokens, pt)).map(f => f.raw);
+}
+function isFavoritePlayer(name) { return matchingFavorites(name).length > 0; }
 
 function addFavorite(name) {
   const n = (name || '').trim();
   if (!n) return;
-  if (favorites.some(f => f.toLowerCase() === n.toLowerCase())) { toast('Already in favorites', true); return; }
+  if (favorites.some(f => normalizeName(f) === normalizeName(n))) { toast('Already in favorites', true); return; }
   favorites.push(n);
   saveFavorites(); rebuildFavSet();
   renderFavoritesList();
@@ -681,10 +795,10 @@ function openFavorites() {
 
   body.innerHTML = `
     <div class="bc-search-row" style="display:flex;gap:8px">
-      <input type="text" id="favInput" placeholder="Player name, exact as shown on Lichess">
+      <input type="text" id="favInput" placeholder="Player name, e.g. Navara or David Navara">
       <button id="favAddBtn">Add</button>
     </div>
-    <p style="font-size:12px;color:var(--text2);margin:8px 0 4px">Their live broadcast games are added automatically, checked every ${FAVORITES_SCAN_MS/1000}s.</p>
+    <p style="font-size:12px;color:var(--text2);margin:8px 0 4px">Surname alone is enough; accents and word order do not matter. Their live broadcast games are added automatically, checked every ${FAVORITES_SCAN_MS/1000}s.</p>
     <div id="favListWrap"></div>`;
 
   const input = document.getElementById('favInput');
@@ -701,9 +815,17 @@ function renderFavoritesList() {
 
   const status = document.createElement('p');
   status.className = 'fav-status';
-  status.textContent = favoritesScanning
-    ? 'Scanning live broadcasts...'
-    : (favoritesLastScan ? `Last checked ${favoritesLastScan.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}` : '');
+  if (favoritesScanning) {
+    status.textContent = 'Scanning live broadcasts...';
+  } else if (favScanInfo && favScanInfo.error) {
+    status.textContent = `Last check failed: ${favScanInfo.error}`;
+  } else if (favoritesLastScan) {
+    const t = favoritesLastScan.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const n = favScanInfo ? favScanInfo.rounds : 0;
+    status.textContent = `Last checked ${t} — ${n} round${n === 1 ? '' : 's'} playing right now`;
+  } else {
+    status.textContent = '';
+  }
   wrap.appendChild(status);
 
   if (!favorites.length) {
@@ -717,9 +839,21 @@ function renderFavoritesList() {
   for (const name of favorites) {
     const row = document.createElement('div');
     row.className = 'fav-row';
-    const nm = document.createElement('span');
+
+    const nm = document.createElement('div');
     nm.className = 'fav-name';
     nm.textContent = name;
+
+    // Say plainly whether this entry found anyone, so a typo is not a silent miss.
+    const hits = favMatches[name] || [];
+    const note = document.createElement('div');
+    note.className = hits.length ? 'fav-hit' : 'fav-miss';
+    if (hits.length) note.textContent = `Playing now: ${hits.join(', ')}`;
+    else if (favoritesScanning) note.textContent = 'Checking...';
+    else if (!favoritesLastScan) note.textContent = '';
+    else note.textContent = 'No live game found';
+    nm.appendChild(note);
+
     const rm = document.createElement('button');
     rm.className = 'btn-danger';
     rm.textContent = 'Remove';
@@ -730,40 +864,106 @@ function renderFavoritesList() {
   }
 }
 
+/* Every round that is playing right now, from both broadcast endpoints. */
+async function collectOngoingRoundIds() {
+  const ids = new Set();
+  const [list, top] = await Promise.allSettled([apiFetchBroadcastList(), apiFetchBroadcastsTop(1)]);
+  if (list.status === 'fulfilled') {
+    for (const item of list.value) {
+      for (const r of (item.rounds || [])) if (r.ongoing && !r.finished) ids.add(r.id);
+    }
+  }
+  if (top.status === 'fulfilled') {
+    for (const item of (top.value.active || [])) {
+      if (item.round && roundStatus(item.round) === 'live') ids.add(item.round.id);
+    }
+  }
+  if (list.status === 'rejected' && top.status === 'rejected') throw list.reason;
+  return [...ids].slice(0, FAVORITES_MAX_ROUNDS);
+}
+
 async function scanFavorites() {
+  if (favoritesScanning) return;   // a slow scan must not overlap the next tick
   if (!favorites.length) {
     favoritesSource.games = [];
+    favRoundIds = [];
+    favMatches = {}; favScanInfo = null;
     render();
+    return;
+  }
+  if (isRateLimited()) {
+    favScanInfo = {rounds: 0, games: 0, error: rateLimitError().message};
+    renderFavoritesList();
     return;
   }
   favoritesScanning = true;
   renderFavoritesList();
   try {
-    const data = await apiFetchBroadcastsTop(1);
-    const liveItems = (data.active || []).filter(item => item.round && roundStatus(item.round) === 'live');
+    const roundIds = await collectOngoingRoundIds();
     const matched = [];
-    for (const item of liveItems) {
+    const hits = {};
+    let rateLimited = false;
+    for (const rid of roundIds) {
       try {
-        const rd = await apiFetchRound(item.round.id);
-        const roundUrl = rd.round.url || '';
+        const rd = await apiFetchRound(rid);
+        const roundUrl = rd.round?.url || '';
         for (const game of (rd.games || [])) {
-          const w = game.players?.[0], b = game.players?.[1];
-          if (isFavoritePlayer(w?.name) || isFavoritePlayer(b?.name)) {
-            matched.push({...game, _roundUrl: roundUrl, _roundId: item.round.id});
+          const names = (game.players || []).map(p => p?.name);
+          const favs = [...new Set(names.flatMap(n => matchingFavorites(n)))];
+          if (!favs.length) continue;
+          matched.push({...game, _roundUrl: roundUrl, _roundId: rid});
+          for (const f of favs) {
+            for (const n of names) {
+              if (n && matchingFavorites(n).includes(f)) (hits[f] = hits[f] || []).push(n);
+            }
           }
         }
-        await sleep(150);
-      } catch(e) { console.warn('favorites scan round fail', item.round.id, e); }
+        await sleep(FAVORITES_ROUND_DELAY_MS);
+      } catch(e) {
+        console.warn('favorites scan round fail', rid, e);
+        // Lichess throttles bursts; stop this pass rather than dig the hole deeper.
+        if (e.status === 429) { rateLimited = true; break; }
+      }
     }
+    for (const f of Object.keys(hits)) hits[f] = [...new Set(hits[f])];
     favoritesSource.games = matched;
+    favRoundIds = [...new Set(matched.map(g => g._roundId))];
+    favMatches = hits;
+    favScanInfo = {rounds: roundIds.length, games: matched.length,
+                   error: rateLimited ? rateLimitError().message : null};
     favoritesLastScan = new Date();
   } catch(e) {
     console.warn('favorites scan failed', e);
+    favScanInfo = {rounds: 0, games: 0, error: e.message || 'scan failed'};
   } finally {
     favoritesScanning = false;
     renderFavoritesList();
     render();
   }
+}
+
+/* The full sweep is a minute apart, but the games it found are live, so keep
+   them fresh on the normal poll: that is one or two rounds, not fourteen. */
+async function refreshFavoriteRounds() {
+  if (!favorites.length || favoritesScanning || !favRoundIds.length) return false;
+  const matched = [];
+  for (const rid of favRoundIds) {
+    try {
+      const rd = await apiFetchRound(rid);
+      const roundUrl = rd.round?.url || '';
+      for (const game of (rd.games || [])) {
+        if ((game.players || []).some(p => isFavoritePlayer(p?.name))) {
+          matched.push({...game, _roundUrl: roundUrl, _roundId: rid});
+        }
+      }
+      await sleep(150);
+    } catch(e) {
+      console.warn('favorites refresh fail', rid, e);
+      if (e.status === 429) return false;
+    }
+  }
+  favoritesSource.games = matched;
+  return true;
 }
 
 function startFavoritesPoll() { if (favoritesTimer) clearInterval(favoritesTimer); favoritesTimer = setInterval(scanFavorites, FAVORITES_SCAN_MS); }
