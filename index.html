@@ -68,6 +68,9 @@
 [data-theme="light"] .sq.hl,[data-theme="light"] .sq.hd{
   background-image:linear-gradient(var(--brand-hl),var(--brand-hl))}
 [data-theme="light"] .result-overlay{background:rgba(29,30,62,.72)}
+/* The dark theme's 65% fade turns the light board into grey mush. */
+[data-theme="light"] .game-card.finished{opacity:.88}
+[data-theme="light"] .game-card.finished:hover{opacity:1}
 
 /* Player bars, sized to stay readable once OBS scales the capture down. */
 [data-theme="light"] .player-row{padding:5px 8px;gap:5px;min-height:32px;background:#fff;color:var(--brand-navy)}
@@ -1337,8 +1340,12 @@ function makeCard(game, src, idx, total) {
   return card;
 }
 
+/* The dark theme sets names in small sans, where "Surname, Forename" fits.
+   The light theme sets them large in Playfair for the stream, where it does
+   not - there, show the surname alone. */
 function displayName(full) {
   if (!full) return '?';
+  if (currentTheme() !== 'light') return full;
   const i = full.indexOf(',');
   return (i > 0 ? full.slice(0, i).trim() : full.trim()) || full;
 }
@@ -1781,7 +1788,14 @@ function applyTheme(t) {
   if (b) b.textContent = t === 'light' ? '☽ Dark' : '☀ Light';
 }
 function currentTheme() { return document.documentElement.getAttribute('data-theme') || 'dark'; }
-function toggleTheme() { applyTheme(currentTheme() === 'light' ? 'dark' : 'light'); }
+function toggleTheme() {
+  applyTheme(currentTheme() === 'light' ? 'dark' : 'light');
+  // render() reuses existing cards, so drop them: the themes spell names
+  // differently and the bars have to be rebuilt.
+  const c = document.getElementById('sourceContainer');
+  if (c) c.innerHTML = '';
+  render();
+}
 
 /* ======= Init ======= */
 async function init() {
