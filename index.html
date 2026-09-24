@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lichess Spectator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
+<script>
+/* Set the theme before the first paint, otherwise the dark default flashes. */
+(function(){
+  var q = new URLSearchParams(location.search).get('theme');
+  var t = (q === 'light' || q === 'stream') ? 'light'
+        : (q === 'dark') ? 'dark'
+        : (localStorage.getItem('lspc-theme') || 'dark');
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -14,7 +27,74 @@
   --hlsq:#cdd16a;--hdsq:#aaa23a;
   --title:#bf811d;--border:#3a3a3a;
   --board-min:220px;
+
+  /* Stream graphics palette - the light theme is built only from these */
+  --brand-navy:#1D1E3E;
+  --brand-red:#C8102E;
+  --brand-blue:#1C75BC;
+  --brand-light:#E7E5DF;
+  --brand-beige:#D1C6B8;
+  --brand-lsq:#EFE8DC;
+  --brand-dsq:#B8A68F;
+  --brand-hl:rgba(28,117,188,.30);
+  --brand-frame:5px;
+  --brand-serif:'Playfair Display',Georgia,serif;
 }
+
+/* ===================== Light (stream) theme ===================== */
+:root[data-theme="light"]{
+  --bg:var(--brand-light);--bg2:#fff;--bg3:#fff;
+  --text:var(--brand-navy);--text2:#6E6F84;
+  --accent:var(--brand-navy);--accent2:var(--brand-blue);
+  --lsq:var(--brand-lsq);--dsq:var(--brand-dsq);
+  --title:var(--brand-red);--border:var(--brand-beige);
+}
+/* Controls inherit white label text from the dark theme's base button rule. */
+[data-theme="light"] .btn-secondary{background:#fff;color:var(--text)}
+[data-theme="light"] .btn-secondary:hover{border-color:var(--brand-blue);background:var(--brand-light)}
+[data-theme="light"] .size-btns button,
+[data-theme="light"] .round-btn,
+[data-theme="light"] .bc-cat-btn,
+[data-theme="light"] .reorder-btns button{background:#fff}
+[data-theme="light"] .round-btn.live{border-color:var(--brand-blue);background:rgba(28,117,188,.14)}
+[data-theme="light"] .bc-cat-btn.on{border-color:var(--brand-blue);background:rgba(28,117,188,.14)}
+
+/* Board: navy frame, no rounding, translucent blue wash for the last move. */
+[data-theme="light"] .game-card{border-radius:0}
+[data-theme="light"] .game-card:hover{border-color:var(--brand-blue)}
+[data-theme="light"] .board-wrap{border:var(--brand-frame) solid var(--brand-navy)}
+[data-theme="light"] .sq.hl{background:var(--lsq)}
+[data-theme="light"] .sq.hd{background:var(--dsq)}
+[data-theme="light"] .sq.hl,[data-theme="light"] .sq.hd{
+  background-image:linear-gradient(var(--brand-hl),var(--brand-hl))}
+[data-theme="light"] .result-overlay{background:rgba(29,30,62,.72)}
+
+/* Player bars, sized to stay readable once OBS scales the capture down. */
+[data-theme="light"] .player-row{padding:5px 8px;gap:5px;min-height:32px;background:#fff;color:var(--brand-navy)}
+[data-theme="light"] .player-row.active{background:var(--brand-light)}
+[data-theme="light"] .player-title{font-family:var(--brand-serif);font-weight:400;font-size:15px;color:var(--brand-red)}
+[data-theme="light"] .player-name{font-family:var(--brand-serif);font-weight:700;font-size:17px;letter-spacing:.3px;text-transform:uppercase}
+[data-theme="light"] .player-rating{font-size:12px}
+[data-theme="light"] .player-flag img{height:14px}
+[data-theme="light"] .player-clock{font-family:inherit;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;
+  padding:2px 7px;border-radius:0;min-width:62px;background:var(--brand-light);color:var(--brand-navy)}
+[data-theme="light"] .player-clock.active{background:var(--brand-navy);color:#fff}
+[data-theme="light"] .player-clock.low{background:var(--brand-red);color:#fff}
+
+/* Accents that were hard-coded for the dark theme. */
+[data-theme="light"] .live-dot,
+[data-theme="light"] .bc-live-tag{background:var(--brand-red)}
+[data-theme="light"] .bc-live-tag .live-dot{background:#fff}
+[data-theme="light"] .modal-bg{background:rgba(29,30,62,.55)}
+[data-theme="light"] .game-remove{background:rgba(29,30,62,.65);color:#fff}
+[data-theme="light"] .game-remove:hover{background:var(--brand-red)}
+[data-theme="light"] .card-fav-badge{background:var(--brand-blue);color:#fff}
+[data-theme="light"] .toast.err{border-color:var(--brand-red);color:var(--brand-red)}
+[data-theme="light"] .btn-danger:hover{color:var(--brand-red)}
+[data-theme="light"] .picker-game .pg-live{color:var(--brand-red)}
+[data-theme="light"] .player-star-btn:hover,
+[data-theme="light"] .player-star-btn.on,
+[data-theme="light"] .fav-hit{color:var(--brand-blue)}
 html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
 
 /* Header */
@@ -209,6 +289,7 @@ main{padding:16px;padding-bottom:44px}
     <button onclick="addFromInput()" id="addBtn">Add</button>
     <button class="btn-secondary" onclick="openBrowse()">Browse</button>
     <button class="btn-secondary" onclick="openFavorites()">&#9733; Favorites</button>
+    <button class="btn-secondary" id="themeBtn" onclick="toggleTheme()" title="Switch between the dark and the light (stream) look"></button>
   </div>
 </header>
 
@@ -1256,6 +1337,12 @@ function makeCard(game, src, idx, total) {
   return card;
 }
 
+function displayName(full) {
+  if (!full) return '?';
+  const i = full.indexOf(',');
+  return (i > 0 ? full.slice(0, i).trim() : full.trim()) || full;
+}
+
 function playerRow(p, isActive) {
   const row = document.createElement('div');
   row.className = 'player-row' + (isActive ? ' active' : '');
@@ -1286,7 +1373,10 @@ function playerRow(p, isActive) {
   }
   const nm = document.createElement('span');
   nm.className = 'player-name';
-  nm.textContent = p.name || '?';
+  /* Lichess writes "Surname, Forename"; only the surname fits a card this
+     narrow, so show that and keep the full name in the tooltip. */
+  nm.textContent = displayName(p.name);
+  nm.title = p.name || '';
   row.appendChild(nm);
 
   if (p.rating) {
@@ -1681,8 +1771,22 @@ function toast(msg, err) {
 
 function status(txt) { document.getElementById('statusText').textContent = txt; }
 
+/* ======= Theme ======= */
+/* The attribute is already set by the head script; this only keeps the button
+   label in step and remembers the choice. */
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('lspc-theme', t);
+  const b = document.getElementById('themeBtn');
+  if (b) b.textContent = t === 'light' ? '☽ Dark' : '☀ Light';
+}
+function currentTheme() { return document.documentElement.getAttribute('data-theme') || 'dark'; }
+function toggleTheme() { applyTheme(currentTheme() === 'light' ? 'dark' : 'light'); }
+
 /* ======= Init ======= */
 async function init() {
+  applyTheme(currentTheme());
+
   // Board size
   setSize(localStorage.getItem('lspc-sz') || 'm');
 
