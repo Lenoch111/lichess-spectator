@@ -394,6 +394,7 @@ function flagImg(fed, size) {
 /* ======= State ======= */
 let sources = [];   // [{type,id,name,roundUrl,games:[...],selectedIds:[...]}]
 let polling = null;
+let pollWorker = null;
 let piecesOk = true; // assume SVG pieces load, flip on first error
 
 /* ======= Favorites state ======= */
@@ -820,7 +821,31 @@ async function poll() {
   } finally { pollRunning = false; }
 }
 
-function startPoll() { if(polling) clearInterval(polling); polling = setInterval(poll, POLL_MS); }
+/* A browser window hidden behind OBS gets its timers throttled to about once a
+   minute, which made the boards look frozen until the window was clicked. A
+   worker's timer is not throttled that way, so the tick comes from there and
+   the page keeps polling while it is out of sight. */
+function startPoll() {
+  if (polling) { clearInterval(polling); polling = null; }
+  if (pollWorker) { pollWorker.terminate(); pollWorker = null; }
+  try {
+    const src = 'let id=null;onmessage=function(e){if(id)clearInterval(id);'
+              + 'id=setInterval(function(){postMessage(0)},e.data)};';
+    pollWorker = new Worker(URL.createObjectURL(new Blob([src], {type:'application/javascript'})));
+    pollWorker.onmessage = () => poll();
+    pollWorker.onerror = () => { pollWorker = null; polling = setInterval(poll, POLL_MS); };
+    pollWorker.postMessage(POLL_MS);
+  } catch(e) {
+    // No worker available: the plain timer still works, just throttled when hidden.
+    polling = setInterval(poll, POLL_MS);
+  }
+}
+
+/* Coming back to the window should show the current position at once, without
+   waiting for the next tick. */
+function refreshNow() { poll(); }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNow(); });
+window.addEventListener('focus', refreshNow);
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /* ======= Favorites ======= */
