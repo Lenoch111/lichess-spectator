@@ -41,6 +41,14 @@
   --brand-serif:'Playfair Display',Georgia,serif;
 }
 
+/* ?bare=1 - only the boards, for an OBS browser source or a clean capture. */
+[data-bare="1"] header,
+[data-bare="1"] .status-bar,
+[data-bare="1"] .filter-bar,
+[data-bare="1"] .source-header{display:none !important}
+[data-bare="1"] main{padding:0}
+[data-bare="1"] .source-group{margin-bottom:0}
+
 /* ===================== Light (stream) theme ===================== */
 :root[data-theme="light"]{
   --bg:var(--brand-light);--bg2:#fff;--bg3:#fff;
@@ -293,6 +301,7 @@ main{padding:16px;padding-bottom:44px}
     <button class="btn-secondary" onclick="openBrowse()">Browse</button>
     <button class="btn-secondary" onclick="openFavorites()">&#9733; Favorites</button>
     <button class="btn-secondary" id="themeBtn" onclick="toggleTheme()" title="Switch between the dark and the light (stream) look"></button>
+    <button class="btn-secondary" onclick="copyObsUrl()" title="Copy a link that shows these boards on their own, for an OBS browser source">OBS</button>
   </div>
 </header>
 
@@ -839,6 +848,27 @@ function startPoll() {
     // No worker available: the plain timer still works, just throttled when hidden.
     polling = setInterval(poll, POLL_MS);
   }
+}
+
+/* Browsers never throttle a tab that is playing audio, so hold an inaudible
+   loop open. It needs a user gesture to start, hence the one-shot listeners. */
+let keepAlive = null;
+function startKeepAlive() {
+  if (keepAlive) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;         // not zero: some builds treat silence as idle
+    osc.frequency.value = 30;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    ctx.resume();
+    keepAlive = ctx;
+  } catch(e) { /* no audio available: the worker tick is all we have */ }
+}
+for (const ev of ['pointerdown','keydown']) {
+  window.addEventListener(ev, startKeepAlive, {once:true});
 }
 
 /* Coming back to the window should show the current position at once, without
@@ -1785,9 +1815,72 @@ function closeModal() {
 }
 
 /* ======= Persistence ======= */
+/* When the games come from the URL, the page is a read-only view (an OBS
+   browser source, a second screen) and must not overwrite the saved setup. */
+let urlDriven = false;
+
 function save() {
+  if (urlDriven) return;
   const data = sources.map(s => ({type:s.type, id:s.id, name:s.name, selectedIds:s.selectedIds||null}));
   localStorage.setItem('lspc-sources', JSON.stringify(data));
+}
+
+/* Two accepted forms:
+     ?round=<id|url>&games=<id,id>   one round, optionally narrowed
+     ?r=<roundId>:<id,id>&r=...      several rounds, repeated
+   `games` empty or absent means every board in the round. */
+function oneUrlSource(roundRaw, gamesRaw) {
+  const parsed = parseInput(roundRaw);
+  if (!parsed) return null;
+  const id = parsed.type === 'broadcast-game' ? parsed.roundId : parsed.id;
+  let selectedIds = parsed.type === 'broadcast-game' ? [parsed.gameId] : null;
+  if (gamesRaw) {
+    const list = gamesRaw.split(',').map(x => x.trim()).filter(Boolean);
+    if (list.length) selectedIds = list;
+  }
+  return {type:'broadcast-round', id, name:'', selectedIds};
+}
+
+function sourcesFromUrl() {
+  const q = new URLSearchParams(location.search);
+  const out = [];
+
+  for (const spec of q.getAll('r')) {
+    const at = spec.indexOf(':');
+    const src = at >= 0 ? oneUrlSource(spec.slice(0, at), spec.slice(at + 1))
+                        : oneUrlSource(spec, '');
+    if (src) out.push(src);
+  }
+
+  const raw = q.get('round') || q.get('game') || q.get('url');
+  if (raw) {
+    const src = oneUrlSource(raw, q.get('games') || '');
+    if (src) out.push(src);
+  }
+  return out.length ? out : null;
+}
+
+/* Hand the current setup over as a link, so an OBS browser source (or a second
+   screen) shows the same boards without sharing this browser's storage. */
+function obsUrl() {
+  const parts = sources
+    .filter(s => s.type === 'broadcast-round')
+    .map(s => 'r=' + encodeURIComponent(s.id + ':' + (s.selectedIds || []).join(',')));
+  if (!parts.length) return null;
+  parts.push('theme=' + currentTheme(), 'bare=1');
+  return location.origin + location.pathname + '?' + parts.join('&');
+}
+
+async function copyObsUrl() {
+  const url = obsUrl();
+  if (!url) { toast('Add some games first', true); return; }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('OBS link copied to the clipboard');
+  } catch(e) {
+    // Clipboard blocked (no permission, insecure origin): show it to copy by hand.
+    prompt('Copy this URL into an OBS browser source:', url);
+  }
 }
 
 function load() {
@@ -1839,8 +1932,15 @@ async function init() {
   favorites = loadFavorites();
   rebuildFavSet();
 
-  // Load saved sources
-  const saved = load();
+  // ?bare=1 strips the page down to the boards, for a capture or a browser source
+  if (new URLSearchParams(location.search).get('bare') === '1') {
+    document.documentElement.setAttribute('data-bare', '1');
+  }
+
+  // Load sources: the URL wins over the saved setup, and never replaces it
+  const fromUrl = sourcesFromUrl();
+  urlDriven = !!fromUrl;
+  const saved = fromUrl || load();
   if (saved.length) {
     status('Loading saved games...');
     for (const s of saved) {
