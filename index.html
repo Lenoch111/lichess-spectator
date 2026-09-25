@@ -346,6 +346,9 @@ const ROUND_RPM = 18;
 const RATE_LIMIT_COOLDOWN_MS = 70000;
 const ROUND_CACHE_MS = 2500;
 const SIZES = {s:'160px',m:'220px',l:'300px'};
+/* Lichess publishes a round's pairings before play starts, with no position on
+   them yet. Draw the starting position instead of an empty square. */
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
 const PIECE_MAP = {
   K:'wK',Q:'wQ',R:'wR',B:'wB',N:'wN',P:'wP',
   k:'bK',q:'bQ',r:'bR',b:'bB',n:'bN',p:'bP'
@@ -1259,7 +1262,8 @@ function makeCard(game, src, idx, total) {
   card.dataset.fen = game.fen || '';
   card.dataset.st = game.status || '';
 
-  const ac = game.fen ? activeColor(game.fen) : 'w';
+  const hasPos = !!game.fen;
+  const ac = hasPos ? activeColor(game.fen) : 'w';
   const w = game.players?.[0] || {};
   const b = game.players?.[1] || {};
   const isLive = game.status === '*';
@@ -1282,11 +1286,12 @@ function makeCard(game, src, idx, total) {
   }
 
   // Black player (top)
-  card.appendChild(playerRow(b, ac==='b' && isLive));
+  card.appendChild(playerRow(b, ac==='b' && isLive && hasPos));
   // Board
   const wrap = document.createElement('div');
   wrap.className = 'board-wrap';
-  if (game.fen) wrap.appendChild(makeBoard(game.fen, game.lastMove));
+  // No position yet: show the starting one, with nothing highlighted.
+  wrap.appendChild(hasPos ? makeBoard(game.fen, game.lastMove) : makeBoard(START_FEN, null));
   if (!isLive && game.status) {
     const ov = document.createElement('div');
     ov.className = 'result-overlay';
@@ -1295,7 +1300,7 @@ function makeCard(game, src, idx, total) {
   }
   card.appendChild(wrap);
   // White player (bottom)
-  card.appendChild(playerRow(w, ac==='w' && isLive));
+  card.appendChild(playerRow(w, ac==='w' && isLive && hasPos));
   // Footer
   const ft = document.createElement('div');
   ft.className = 'game-footer';
@@ -1404,7 +1409,8 @@ function playerRow(p, isActive) {
 
 function updateCardClocks(card, game) {
   const rows = card.querySelectorAll('.player-row');
-  const ac = game.fen ? activeColor(game.fen) : 'w';
+  const hasPos = !!game.fen;
+  const ac = hasPos ? activeColor(game.fen) : 'w';
   const isLive = game.status === '*';
   // rows[0] = black (top), rows[1] = white (bottom)
   const players = [game.players?.[1], game.players?.[0]]; // [black, white]
@@ -1412,7 +1418,7 @@ function updateCardClocks(card, game) {
   rows.forEach((row, i) => {
     const p = players[i];
     if (!p) return;
-    const active = ac === colors[i] && isLive;
+    const active = ac === colors[i] && isLive && hasPos;
     row.classList.toggle('active', active);
     const cl = row.querySelector('.player-clock');
     if (cl && p.clock != null) {
