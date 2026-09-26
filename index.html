@@ -367,14 +367,15 @@ const UNI = {
   bK:'\u265A',bQ:'\u265B',bR:'\u265C',bB:'\u265D',bN:'\u265E',bP:'\u265F'
 };
 
-/* ======= FIDE federation to ISO alpha-2 (for flag emoji) ======= */
+/* ======= FIDE federation to flagcdn code (ISO alpha-2, or GB-XXX for the
+   British home nations, which have their own flags rather than the Union Jack) ======= */
 const F2={
   AFG:'AF',ALB:'AL',ALG:'DZ',AND:'AD',ANG:'AO',ANT:'AG',ARG:'AR',ARM:'AM',ARU:'AW',AUS:'AU',
   AUT:'AT',AZE:'AZ',BAH:'BS',BRN:'BH',BAN:'BD',BAR:'BB',BLR:'BY',BEL:'BE',BIZ:'BZ',BEN:'BJ',
   BER:'BM',BHU:'BT',BOL:'BO',BIH:'BA',BOT:'BW',BRA:'BR',BRU:'BN',BUL:'BG',BUR:'BF',BDI:'BI',
   CAM:'KH',CMR:'CM',CAN:'CA',CPV:'CV',CAY:'KY',CAF:'CF',CHA:'TD',CHI:'CL',CHN:'CN',COL:'CO',
   COM:'KM',CGO:'CG',COD:'CD',CRC:'CR',CIV:'CI',CRO:'HR',CUB:'CU',CYP:'CY',CZE:'CZ',DEN:'DK',
-  DJI:'DJ',DMA:'DM',DOM:'DO',ECU:'EC',EGY:'EG',ESA:'SV',ENG:'GB',EQG:'GQ',ERI:'ER',EST:'EE',
+  DJI:'DJ',DMA:'DM',DOM:'DO',ECU:'EC',EGY:'EG',ESA:'SV',ENG:'GB-ENG',EQG:'GQ',ERI:'ER',EST:'EE',
   ETH:'ET',FAI:'FO',FIJ:'FJ',FIN:'FI',FRA:'FR',GAB:'GA',GAM:'GM',GEO:'GE',GER:'DE',GHA:'GH',
   GRE:'GR',GUA:'GT',GUI:'GN',GBS:'GW',GUY:'GY',HAI:'HT',HON:'HN',HKG:'HK',HUN:'HU',ISL:'IS',
   IND:'IN',INA:'ID',IRI:'IR',IRQ:'IQ',IRL:'IE',ISR:'IL',ITA:'IT',JAM:'JM',JPN:'JP',JOR:'JO',
@@ -383,11 +384,11 @@ const F2={
   MDV:'MV',MLI:'ML',MLT:'MT',MRI:'MU',MEX:'MX',MDA:'MD',MNC:'MC',MGL:'MN',MNE:'ME',MAR:'MA',
   MOZ:'MZ',MYA:'MM',NAM:'NA',NEP:'NP',NED:'NL',NZL:'NZ',NCA:'NI',NIG:'NE',NGR:'NG',MKD:'MK',
   NOR:'NO',OMA:'OM',PAK:'PK',PLE:'PS',PAN:'PA',PAR:'PY',PER:'PE',PHI:'PH',POL:'PL',POR:'PT',
-  PUR:'PR',QAT:'QA',ROU:'RO',RUS:'RU',RWA:'RW',KSA:'SA',SCO:'GB',SEN:'SN',SRB:'RS',SEY:'SC',
+  PUR:'PR',QAT:'QA',ROU:'RO',RUS:'RU',RWA:'RW',KSA:'SA',SCO:'GB-SCT',SEN:'SN',SRB:'RS',SEY:'SC',
   SGP:'SG',SVK:'SK',SLO:'SI',SOM:'SO',RSA:'ZA',ESP:'ES',SRI:'LK',SUD:'SD',SUR:'SR',SWE:'SE',
   SUI:'CH',SYR:'SY',TPE:'TW',TJK:'TJ',TAN:'TZ',THA:'TH',TLS:'TL',TOG:'TG',TTO:'TT',TUN:'TN',
   TUR:'TR',TKM:'TM',UAE:'AE',UGA:'UG',UKR:'UA',URU:'UY',USA:'US',UZB:'UZ',VEN:'VE',VIE:'VN',
-  WLS:'GB',YEM:'YE',ZAM:'ZM',ZIM:'ZW'
+  WLS:'GB-WLS',NIR:'GB-NIR',YEM:'YE',ZAM:'ZM',ZIM:'ZW'
 };
 function flagCode(fed) {
   if (!fed) return '';
