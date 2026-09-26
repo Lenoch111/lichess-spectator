@@ -1302,6 +1302,9 @@ function makeCard(game, src, idx, total) {
   card.dataset.st = game.status || '';
 
   const hasPos = !!game.fen;
+  /* Before the first move there is nothing to count: the round may be posted
+     with the starting position hours ahead of play. */
+  const started = !!game.lastMove;
   const ac = hasPos ? activeColor(game.fen) : 'w';
   const w = game.players?.[0] || {};
   const b = game.players?.[1] || {};
@@ -1325,7 +1328,7 @@ function makeCard(game, src, idx, total) {
   }
 
   // Black player (top)
-  card.appendChild(playerRow(b, ac==='b' && isLive && hasPos));
+  card.appendChild(playerRow(b, ac==='b' && isLive && hasPos && started));
   // Board
   const wrap = document.createElement('div');
   wrap.className = 'board-wrap';
@@ -1339,7 +1342,7 @@ function makeCard(game, src, idx, total) {
   }
   card.appendChild(wrap);
   // White player (bottom)
-  card.appendChild(playerRow(w, ac==='w' && isLive && hasPos));
+  card.appendChild(playerRow(w, ac==='w' && isLive && hasPos && started));
   // Footer
   const ft = document.createElement('div');
   ft.className = 'game-footer';
@@ -1447,6 +1450,7 @@ function playerRow(p, isActive) {
 function updateCardClocks(card, game) {
   const rows = card.querySelectorAll('.player-row');
   const hasPos = !!game.fen;
+  const started = !!game.lastMove;
   const ac = hasPos ? activeColor(game.fen) : 'w';
   const isLive = game.status === '*';
   // rows[0] = black (top), rows[1] = white (bottom)
@@ -1455,7 +1459,7 @@ function updateCardClocks(card, game) {
   rows.forEach((row, i) => {
     const p = players[i];
     if (!p) return;
-    const active = ac === colors[i] && isLive && hasPos;
+    const active = ac === colors[i] && isLive && hasPos && started;
     row.classList.toggle('active', active);
     const cl = row.querySelector('.player-clock');
     if (cl && p.clock != null) paintClock(cl, p.clock, active);
@@ -1465,9 +1469,17 @@ function updateCardClocks(card, game) {
 /* Lichess sends a clock reading, not a running clock. Counting it down locally
    between polls is what makes the board feel live, and it costs no requests. */
 function paintClock(el, cs, active) {
-  el.dataset.cs = (typeof cs === 'number' ? cs : 0);
-  el.dataset.at = Date.now();
-  el.dataset.on = active ? '1' : '';
+  const val = (typeof cs === 'number' ? cs : 0);
+  const on = active ? '1' : '';
+  /* Lichess reports the clock as it stood at that player's last move; the
+     figure does not move between moves. So re-base only when the reading or
+     the side to move actually changes - re-basing on every refresh restarted
+     the countdown and left the clock sawtoothing instead of running down. */
+  if (+el.dataset.cs !== val || el.dataset.on !== on) {
+    el.dataset.cs = val;
+    el.dataset.at = Date.now();
+    el.dataset.on = on;
+  }
   drawClock(el);
 }
 
