@@ -1305,6 +1305,7 @@ function makeCard(game, src, idx, total) {
   /* Before the first move there is nothing to count: the round may be posted
      with the starting position hours ahead of play. */
   const started = !!game.lastMove;
+  const thinkCs = thinkCsOf(game);
   const ac = hasPos ? activeColor(game.fen) : 'w';
   const w = game.players?.[0] || {};
   const b = game.players?.[1] || {};
@@ -1328,7 +1329,7 @@ function makeCard(game, src, idx, total) {
   }
 
   // Black player (top)
-  card.appendChild(playerRow(b, ac==='b' && isLive && hasPos && started));
+  card.appendChild(playerRow(b, ac==='b' && isLive && hasPos && started, thinkCs));
   // Board
   const wrap = document.createElement('div');
   wrap.className = 'board-wrap';
@@ -1342,7 +1343,7 @@ function makeCard(game, src, idx, total) {
   }
   card.appendChild(wrap);
   // White player (bottom)
-  card.appendChild(playerRow(w, ac==='w' && isLive && hasPos && started));
+  card.appendChild(playerRow(w, ac==='w' && isLive && hasPos && started, thinkCs));
   // Footer
   const ft = document.createElement('div');
   ft.className = 'game-footer';
@@ -1397,7 +1398,7 @@ function displayName(full) {
   return (i > 0 ? full.slice(0, i).trim() : full.trim()) || full;
 }
 
-function playerRow(p, isActive) {
+function playerRow(p, isActive, thinkCs) {
   const row = document.createElement('div');
   row.className = 'player-row' + (isActive ? ' active' : '');
 
@@ -1441,7 +1442,7 @@ function playerRow(p, isActive) {
   }
   if (p.clock != null) {
     const cl = document.createElement('span');
-    paintClock(cl, p.clock, isActive);
+    paintClock(cl, clockNow(p.clock, isActive, thinkCs), isActive);
     row.appendChild(cl);
   }
   return row;
@@ -1451,6 +1452,7 @@ function updateCardClocks(card, game) {
   const rows = card.querySelectorAll('.player-row');
   const hasPos = !!game.fen;
   const started = !!game.lastMove;
+  const thinkCs = thinkCsOf(game);
   const ac = hasPos ? activeColor(game.fen) : 'w';
   const isLive = game.status === '*';
   // rows[0] = black (top), rows[1] = white (bottom)
@@ -1462,12 +1464,26 @@ function updateCardClocks(card, game) {
     const active = ac === colors[i] && isLive && hasPos && started;
     row.classList.toggle('active', active);
     const cl = row.querySelector('.player-clock');
-    if (cl && p.clock != null) paintClock(cl, p.clock, active);
+    if (cl && p.clock != null) paintClock(cl, clockNow(p.clock, active, thinkCs), active);
   });
 }
 
 /* Lichess sends a clock reading, not a running clock. Counting it down locally
    between polls is what makes the board feel live, and it costs no requests. */
+/* Lichess reports a clock as of that player's last move, and reports
+   separately how long the side to move has been thinking. Subtracting that is
+   what makes the figure match the Lichess board: without it a game added mid
+   think shows time the player no longer has, until their next move corrects
+   it in one jump. */
+function clockNow(cs, active, thinkCs) {
+  if (cs == null) return cs;
+  return active ? Math.max(0, cs - (thinkCs || 0)) : cs;
+}
+
+function thinkCsOf(game) {
+  return typeof game.thinkTime === 'number' ? game.thinkTime * 100 : 0;
+}
+
 function paintClock(el, cs, active) {
   const val = (typeof cs === 'number' ? cs : 0);
   const on = active ? '1' : '';
